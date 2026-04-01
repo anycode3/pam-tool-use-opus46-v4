@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ProjectInfo, LayoutData, Device, Modification, DiffChange } from "../types";
+import type { ProjectInfo, LayoutData, Device, Modification, DiffChange, DrcRule, DrcResults } from "../types";
 import * as projectsApi from "../api/projects";
 
 interface ProjectState {
@@ -12,6 +12,9 @@ interface ProjectState {
   selectedDevice: Device | null;
   modifications: Modification[];
   diffChanges: DiffChange[];
+  drcRules: DrcRule[];
+  drcResults: DrcResults | null;
+  highlightedViolationPolygonId: string | null;
   loading: boolean;
   error: string | null;
 
@@ -33,6 +36,11 @@ interface ProjectState {
   fetchDiff: () => Promise<void>;
   downloadLayout: () => Promise<void>;
   clearModifications: () => void;
+  saveDrcRules: (rules: DrcRule[]) => Promise<void>;
+  fetchDrcRules: () => Promise<void>;
+  runDrc: () => Promise<void>;
+  fetchDrcResults: () => Promise<void>;
+  setHighlightedViolationPolygonId: (id: string | null) => void;
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -45,6 +53,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectedDevice: null,
   modifications: [],
   diffChanges: [],
+  drcRules: [],
+  drcResults: null,
+  highlightedViolationPolygonId: null,
   loading: false,
   error: null,
 
@@ -253,4 +264,56 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   clearModifications: () => set({ modifications: [], diffChanges: [] }),
+
+  saveDrcRules: async (rules: DrcRule[]) => {
+    const { currentProject } = get();
+    if (!currentProject) return;
+    set({ loading: true, error: null });
+    try {
+      const { rules: saved } = await projectsApi.saveDrcRules(currentProject.id, rules);
+      set({ drcRules: saved, loading: false });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      set({ error: msg, loading: false });
+    }
+  },
+
+  fetchDrcRules: async () => {
+    const { currentProject } = get();
+    if (!currentProject) return;
+    try {
+      const { rules } = await projectsApi.getDrcRules(currentProject.id);
+      set({ drcRules: rules });
+    } catch {
+      // DRC rules may not exist yet; silently ignore
+    }
+  },
+
+  runDrc: async () => {
+    const { currentProject } = get();
+    if (!currentProject) return;
+    set({ loading: true, error: null });
+    try {
+      const results = await projectsApi.runDrc(currentProject.id);
+      set({ drcResults: results, loading: false });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      set({ error: msg, loading: false });
+    }
+  },
+
+  fetchDrcResults: async () => {
+    const { currentProject } = get();
+    if (!currentProject) return;
+    try {
+      const results = await projectsApi.getDrcResults(currentProject.id);
+      set({ drcResults: results });
+    } catch {
+      // DRC results may not exist yet; silently ignore
+    }
+  },
+
+  setHighlightedViolationPolygonId: (id: string | null) => {
+    set({ highlightedViolationPolygonId: id });
+  },
 }));

@@ -78,3 +78,29 @@ export interface DiffChange {
   old_area: number;
   new_area: number;
 }
+
+export interface DrcRule {
+  id?: string;
+  type: "min_width" | "min_spacing" | "min_area" | "min_overlap" | "max_width";
+  layer: string;
+  layer2?: string;
+  value: number;
+  description: string;
+}
+
+export interface DrcViolation {
+  rule_id: string;
+  rule_type: string;
+  description: string;
+  severity: "error" | "warning";
+  polygon_id: string;
+  actual_value: number;
+  required_value: number;
+  location: [number, number];
+}
+
+export interface DrcResults {
+  violations: DrcViolation[];
+  summary: { total: number; errors: number; warnings: number };
+  passed: boolean;
+}

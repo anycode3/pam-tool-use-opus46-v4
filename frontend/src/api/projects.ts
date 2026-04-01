@@ -1,5 +1,5 @@
 import apiClient from "./client";
-import type { ProjectInfo, LayoutData, LayerInfo, Device, Modification, DiffChange } from "../types";
+import type { ProjectInfo, LayoutData, LayerInfo, Device, Modification, DiffChange, DrcRule, DrcResults } from "../types";
 
 export async function uploadFile(file: File): Promise<ProjectInfo> {
   const formData = new FormData();
@@ -94,5 +94,25 @@ export async function getDiff(projectId: string): Promise<{ changes: DiffChange[
 
 export async function downloadLayout(projectId: string): Promise<Blob> {
   const resp = await apiClient.get(`/api/projects/${projectId}/download`, { responseType: "blob" });
+  return resp.data;
+}
+
+export async function saveDrcRules(id: string, rules: DrcRule[]): Promise<{ rules: DrcRule[] }> {
+  const resp = await apiClient.post(`/api/projects/${id}/drc/rules`, { rules });
+  return resp.data;
+}
+
+export async function getDrcRules(id: string): Promise<{ rules: DrcRule[] }> {
+  const resp = await apiClient.get(`/api/projects/${id}/drc/rules`);
+  return resp.data;
+}
+
+export async function runDrc(id: string): Promise<DrcResults> {
+  const resp = await apiClient.post(`/api/projects/${id}/drc/run`);
+  return resp.data;
+}
+
+export async function getDrcResults(id: string): Promise<DrcResults> {
+  const resp = await apiClient.get(`/api/projects/${id}/drc/results`);
   return resp.data;
 }

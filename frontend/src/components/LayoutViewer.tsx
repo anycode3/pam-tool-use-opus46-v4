@@ -1,8 +1,8 @@
 import { useMemo, useState, useCallback } from "react";
 import { DeckGL, OrthographicView } from "deck.gl";
-import { SolidPolygonLayer } from "deck.gl";
+import { SolidPolygonLayer, ScatterplotLayer } from "deck.gl";
 import { useProjectStore } from "../store/useProjectStore";
-import type { Geometry } from "../types";
+import type { Geometry, DrcViolation } from "../types";
 
 const LAYER_COLORS: Record<number, [number, number, number, number]> = {
   0: [65, 105, 225, 160],
@@ -27,7 +27,7 @@ function getLayerColor(layer: number): [number, number, number, number] {
 }
 
 export default function LayoutViewer() {
-  const { layoutData, visibleLayers, selectedDevice } = useProjectStore();
+  const { layoutData, visibleLayers, selectedDevice, drcResults, highlightedViolationPolygonId } = useProjectStore();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -35,6 +35,11 @@ export default function LayoutViewer() {
     if (!selectedDevice) return new Set();
     return new Set(selectedDevice.polygon_ids);
   }, [selectedDevice]);
+
+  const violationPolygonIds = useMemo<Set<string>>(() => {
+    if (!drcResults) return new Set();
+    return new Set(drcResults.violations.map((v) => v.polygon_id));
+  }, [drcResults]);
 
   const initialViewState = useMemo(() => {
     if (!layoutData) return { target: [0, 0, 0] as [number, number, number], zoom: 0 };
@@ -65,23 +70,47 @@ export default function LayoutViewer() {
       return layerName in visibleLayers ? visibleLayers[layerName] : true;
     });
 
-    return [
-      new SolidPolygonLayer<Geometry>({
-        id: "layout-polygons",
-        data: visibleGeometries,
-        getPolygon: (d: Geometry) => d.points as [number, number][],
-        getFillColor: (d: Geometry) => {
-          if (highlightedPolygonIds.has(d.id)) return DEVICE_HIGHLIGHT_COLOR;
-          if (d.id === selectedId || d.id === hoveredId) return HIGHLIGHT_COLOR;
-          return getLayerColor(d.layer);
-        },
-        pickable: true,
-        updateTriggers: {
-          getFillColor: [hoveredId, selectedId, highlightedPolygonIds],
-        },
-      }),
-    ];
-  }, [layoutData, visibleLayers, hoveredId, selectedId, highlightedPolygonIds]);
+    const polygonLayer = new SolidPolygonLayer<Geometry>({
+      id: "layout-polygons",
+      data: visibleGeometries,
+      getPolygon: (d: Geometry) => d.points as [number, number][],
+      getFillColor: (d: Geometry) => {
+        if (highlightedViolationPolygonId === d.id) return [255, 80, 0, 230];
+        if (violationPolygonIds.has(d.id)) return [255, 100, 50, 180];
+        if (highlightedPolygonIds.has(d.id)) return DEVICE_HIGHLIGHT_COLOR;
+        if (d.id === selectedId || d.id === hoveredId) return HIGHLIGHT_COLOR;
+        return getLayerColor(d.layer);
+      },
+      pickable: true,
+      updateTriggers: {
+        getFillColor: [hoveredId, selectedId, highlightedPolygonIds, violationPolygonIds, highlightedViolationPolygonId],
+      },
+    });
+
+    const result: (typeof polygonLayer | ScatterplotLayer<DrcViolation>)[] = [polygonLayer];
+
+    // Add violation markers when DRC results exist
+    if (drcResults && drcResults.violations.length > 0) {
+      result.push(
+        new ScatterplotLayer<DrcViolation>({
+          id: "drc-violation-markers",
+          data: drcResults.violations,
+          getPosition: (d: DrcViolation) => [d.location[0], d.location[1], 0],
+          getRadius: 0.5,
+          radiusMinPixels: 5,
+          radiusMaxPixels: 14,
+          getFillColor: (d: DrcViolation) =>
+            d.severity === "error" ? [255, 50, 50, 220] : [255, 165, 0, 220],
+          pickable: false,
+          updateTriggers: {
+            getFillColor: [],
+          },
+        })
+      );
+    }
+
+    return result;
+  }, [layoutData, visibleLayers, hoveredId, selectedId, highlightedPolygonIds, violationPolygonIds, drcResults, highlightedViolationPolygonId]);
 
   if (!layoutData) {
     return (

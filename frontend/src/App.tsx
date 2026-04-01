@@ -1,9 +1,11 @@
-import { Layout, Typography, Spin, Alert } from "antd";
+import { Layout, Typography, Spin, Alert, Tabs } from "antd";
 import FileUpload from "./components/FileUpload";
 import ProjectList from "./components/ProjectList";
 import LayoutViewer from "./components/LayoutViewer";
 import LayerPanel from "./components/LayerPanel";
 import DevicePanel from "./components/DevicePanel";
+import DrcRulesPanel from "./components/DrcRulesPanel";
+import DrcResultsPanel from "./components/DrcResultsPanel";
 import { useProjectStore } from "./store/useProjectStore";
 
 const { Header, Sider, Content } = Layout;
@@ -59,11 +61,37 @@ export default function App() {
         </Content>
 
         <Sider
-          width={320}
+          width={340}
           theme="light"
-          style={{ overflowY: "auto", borderLeft: "1px solid #f0f0f0" }}
+          style={{ borderLeft: "1px solid #f0f0f0", display: "flex", flexDirection: "column" }}
         >
-          <DevicePanel />
+          <Tabs
+            defaultActiveKey="devices"
+            size="small"
+            style={{ height: "100%", display: "flex", flexDirection: "column" }}
+            tabBarStyle={{ marginBottom: 0, paddingLeft: 12, paddingRight: 12, flexShrink: 0 }}
+            items={[
+              {
+                key: "devices",
+                label: "器件",
+                children: (
+                  <div style={{ overflowY: "auto", height: "calc(100vh - 120px)" }}>
+                    <DevicePanel />
+                  </div>
+                ),
+              },
+              {
+                key: "drc",
+                label: "DRC",
+                children: (
+                  <div style={{ overflowY: "auto", height: "calc(100vh - 120px)" }}>
+                    <DrcRulesPanel />
+                    <DrcResultsPanel />
+                  </div>
+                ),
+              },
+            ]}
+          />
         </Sider>
       </Layout>
     </Layout>

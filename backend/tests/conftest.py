@@ -16,6 +16,7 @@ def tmp_storage(monkeypatch):
 
 
 import gdstk
+import ezdxf
 
 
 @pytest.fixture
@@ -34,3 +35,31 @@ def sample_gds_path(tmp_path):
     gds_path = tmp_path / "test.gds"
     lib.write_gds(str(gds_path))
     return gds_path
+
+
+@pytest.fixture
+def sample_dxf_path(tmp_path):
+    """Generate a simple DXF file with known geometry for testing."""
+    doc = ezdxf.new()
+    msp = doc.modelspace()
+    doc.layers.add("LAYER1", color=1)
+    doc.layers.add("LAYER2", color=2)
+    doc.layers.add("LAYER3", color=3)
+    msp.add_lwpolyline(
+        [(0, 0), (100, 0), (100, 50), (0, 50)],
+        close=True,
+        dxfattribs={"layer": "LAYER1"},
+    )
+    msp.add_lwpolyline(
+        [(10, 10), (90, 10), (90, 40), (10, 40)],
+        close=True,
+        dxfattribs={"layer": "LAYER2"},
+    )
+    msp.add_lwpolyline(
+        [(200, 0), (250, 0), (250, 10), (200, 10)],
+        close=True,
+        dxfattribs={"layer": "LAYER3"},
+    )
+    dxf_path = tmp_path / "test.dxf"
+    doc.saveas(str(dxf_path))
+    return dxf_path

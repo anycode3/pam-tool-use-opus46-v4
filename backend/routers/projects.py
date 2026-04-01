@@ -1,3 +1,5 @@
+import base64
+
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import FileResponse
 from pathlib import Path
@@ -9,6 +11,7 @@ from services.device_recognition import recognize_devices
 from services.device_modifier import modify_device, apply_modifications
 from services.layout_diff import compute_diff
 from services.layout_writer import write_layout
+from services.drc_engine import run_drc, parse_rules, parse_rule_file, validate_rule
 import config
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -354,3 +357,110 @@ def download_project(project_id: str):
         media_type=media_type,
         filename=filename,
     )
+
+
+# ---- DRC endpoints ----
+
+class DrcRulesRequest(BaseModel):
+    rules: list[dict] | None = None
+    rule_file: str | None = None  # base64-encoded JSON rule file
+
+
+@router.post("/{project_id}/drc/rules")
+def save_drc_rules(project_id: str, body: DrcRulesRequest):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    all_rules: list[dict] = []
+
+    # From direct rules list
+    if body.rules:
+        all_rules.extend(body.rules)
+
+    # From base64-encoded rule file
+    if body.rule_file:
+        try:
+            decoded = base64.b64decode(body.rule_file).decode("utf-8")
+            file_rules = parse_rule_file(decoded)
+            all_rules.extend(file_rules)
+        except Exception as e:
+            raise HTTPException(400, f"Failed to parse rule file: {e}")
+
+    if not all_rules:
+        raise HTTPException(400, "No rules provided")
+
+    # Validate
+    for r in all_rules:
+        err = validate_rule(r)
+        if err:
+            raise HTTPException(400, err)
+
+    parsed = parse_rules(all_rules)
+    storage.save_json(project_id, "drc_rules.json", {"rules": parsed})
+    return {"rules": parsed}
+
+
+@router.get("/{project_id}/drc/rules")
+def get_drc_rules(project_id: str):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    data = storage.load_json(project_id, "drc_rules.json")
+    if not data:
+        return {"rules": []}
+    return data
+
+
+@router.post("/{project_id}/drc/run")
+def run_project_drc(project_id: str):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    layout_data = storage.load_json(project_id, "layout_data.json")
+    if not layout_data:
+        raise HTTPException(404, "Layout data not found. Upload a file first.")
+
+    mapping_data = storage.load_json(project_id, "layer_mapping.json")
+    if not mapping_data or not mapping_data.get("mappings"):
+        raise HTTPException(400, "Layer mapping not set. Configure layer mapping first.")
+
+    rules_data = storage.load_json(project_id, "drc_rules.json")
+    if not rules_data or not rules_data.get("rules"):
+        raise HTTPException(400, "No DRC rules defined. Save rules first.")
+
+    violations = run_drc(
+        layout_data=layout_data,
+        rules=rules_data["rules"],
+        layer_mapping=mapping_data["mappings"],
+    )
+
+    errors = sum(1 for v in violations if v["severity"] == "error")
+    warnings = sum(1 for v in violations if v["severity"] == "warning")
+
+    result = {
+        "violations": violations,
+        "summary": {
+            "total": len(violations),
+            "errors": errors,
+            "warnings": warnings,
+        },
+        "passed": len(violations) == 0,
+    }
+
+    storage.save_json(project_id, "drc_results.json", result)
+    return result
+
+
+@router.get("/{project_id}/drc/results")
+def get_drc_results(project_id: str):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    data = storage.load_json(project_id, "drc_results.json")
+    if not data:
+        raise HTTPException(404, "No DRC results found. Run DRC first.")
+    return data

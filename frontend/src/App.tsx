@@ -59,7 +59,7 @@ export default function App() {
         </Content>
 
         <Sider
-          width={300}
+          width={320}
           theme="light"
           style={{ overflowY: "auto", borderLeft: "1px solid #f0f0f0" }}
         >

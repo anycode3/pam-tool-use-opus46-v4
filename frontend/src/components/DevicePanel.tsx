@@ -19,6 +19,8 @@ import {
 } from "@ant-design/icons";
 import { useProjectStore } from "../store/useProjectStore";
 import type { Device } from "../types";
+import DeviceModifyPanel from "./DeviceModifyPanel";
+import DiffViewer from "./DiffViewer";
 
 const { Text } = Typography;
 
@@ -238,6 +240,12 @@ export default function DevicePanel() {
             size="small"
             style={{ background: "transparent" }}
           />
+
+          {selectedDevice && (
+            <DeviceModifyPanel device={selectedDevice} />
+          )}
+
+          <DiffViewer />
         </div>
       )}
     </div>

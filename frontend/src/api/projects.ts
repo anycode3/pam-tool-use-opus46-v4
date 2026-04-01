@@ -1,5 +1,5 @@
 import apiClient from "./client";
-import type { ProjectInfo, LayoutData, LayerInfo, Device } from "../types";
+import type { ProjectInfo, LayoutData, LayerInfo, Device, Modification, DiffChange } from "../types";
 
 export async function uploadFile(file: File): Promise<ProjectInfo> {
   const formData = new FormData();
@@ -67,5 +67,32 @@ export async function getDevices(id: string): Promise<{ devices: Device[] }> {
 
 export async function getDevice(id: string, deviceId: string): Promise<Device> {
   const resp = await apiClient.get(`/api/projects/${id}/devices/${deviceId}`);
+  return resp.data;
+}
+
+export async function modifyDevice(
+  projectId: string,
+  deviceId: string,
+  params: { new_value: number; mode: string; manual_params?: Record<string, number> }
+): Promise<Modification> {
+  const resp = await apiClient.post(`/api/projects/${projectId}/devices/${deviceId}/modify`, params);
+  return resp.data;
+}
+
+export async function applyModifications(
+  projectId: string,
+  modificationIds: string[]
+): Promise<{ status: string; download_url: string }> {
+  const resp = await apiClient.post(`/api/projects/${projectId}/apply-modifications`, { modifications: modificationIds });
+  return resp.data;
+}
+
+export async function getDiff(projectId: string): Promise<{ changes: DiffChange[] }> {
+  const resp = await apiClient.get(`/api/projects/${projectId}/diff`);
+  return resp.data;
+}
+
+export async function downloadLayout(projectId: string): Promise<Blob> {
+  const resp = await apiClient.get(`/api/projects/${projectId}/download`, { responseType: "blob" });
   return resp.data;
 }

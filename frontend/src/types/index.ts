@@ -55,3 +55,26 @@ export interface Device {
   ports: DevicePort[];
   metrics: Record<string, number>;
 }
+
+export interface PolygonChange {
+  polygon_id: string;
+  old_points: number[][];
+  new_points: number[][];
+}
+
+export interface Modification {
+  id: string;
+  device_id: string;
+  device_type: string;
+  old_value: number;
+  new_value: number;
+  changes: PolygonChange[];
+}
+
+export interface DiffChange {
+  polygon_id: string;
+  old_bbox: [number, number, number, number];
+  new_bbox: [number, number, number, number];
+  old_area: number;
+  new_area: number;
+}

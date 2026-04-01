@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ProjectInfo, LayoutData, Device } from "../types";
+import type { ProjectInfo, LayoutData, Device, Modification, DiffChange } from "../types";
 import * as projectsApi from "../api/projects";
 
 interface ProjectState {
@@ -10,6 +10,8 @@ interface ProjectState {
   visibleLayers: Record<string, boolean>;
   devices: Device[];
   selectedDevice: Device | null;
+  modifications: Modification[];
+  diffChanges: DiffChange[];
   loading: boolean;
   error: string | null;
 
@@ -26,6 +28,11 @@ interface ProjectState {
   recognizeDevices: (projectId: string) => Promise<void>;
   selectDevice: (device: Device | null) => void;
   fetchDevices: (projectId: string) => Promise<void>;
+  modifyDevice: (deviceId: string, newValue: number, mode: string, manualParams?: Record<string, number>) => Promise<void>;
+  applyModifications: () => Promise<void>;
+  fetchDiff: () => Promise<void>;
+  downloadLayout: () => Promise<void>;
+  clearModifications: () => void;
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -36,6 +43,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   visibleLayers: {},
   devices: [],
   selectedDevice: null,
+  modifications: [],
+  diffChanges: [],
   loading: false,
   error: null,
 
@@ -178,4 +187,70 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // Devices may not be recognized yet; silently ignore
     }
   },
+
+  modifyDevice: async (deviceId: string, newValue: number, mode: string, manualParams?: Record<string, number>) => {
+    const { currentProject } = get();
+    if (!currentProject) return;
+    set({ loading: true, error: null });
+    try {
+      const modification = await projectsApi.modifyDevice(currentProject.id, deviceId, {
+        new_value: newValue,
+        mode,
+        manual_params: manualParams,
+      });
+      set((s) => ({ modifications: [...s.modifications, modification], loading: false }));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      set({ error: msg, loading: false });
+    }
+  },
+
+  applyModifications: async () => {
+    const { currentProject, modifications } = get();
+    if (!currentProject || modifications.length === 0) return;
+    set({ loading: true, error: null });
+    try {
+      await projectsApi.applyModifications(currentProject.id, modifications.map((m) => m.id));
+      set({ loading: false });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      set({ error: msg, loading: false });
+    }
+  },
+
+  fetchDiff: async () => {
+    const { currentProject } = get();
+    if (!currentProject) return;
+    set({ loading: true, error: null });
+    try {
+      const { changes } = await projectsApi.getDiff(currentProject.id);
+      set({ diffChanges: changes, loading: false });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      set({ error: msg, loading: false });
+    }
+  },
+
+  downloadLayout: async () => {
+    const { currentProject } = get();
+    if (!currentProject) return;
+    set({ loading: true, error: null });
+    try {
+      const blob = await projectsApi.downloadLayout(currentProject.id);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${currentProject.name}_modified.gds`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      set({ loading: false });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      set({ error: msg, loading: false });
+    }
+  },
+
+  clearModifications: () => set({ modifications: [], diffChanges: [] }),
 }));

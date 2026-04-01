@@ -1,5 +1,5 @@
 import apiClient from "./client";
-import type { ProjectInfo, LayoutData, LayerInfo } from "../types";
+import type { ProjectInfo, LayoutData, LayerInfo, Device } from "../types";
 
 export async function uploadFile(file: File): Promise<ProjectInfo> {
   const formData = new FormData();
@@ -49,5 +49,23 @@ export async function saveLayerMapping(
   mappings: Record<string, string>
 ): Promise<{ mappings: Record<string, string> }> {
   const resp = await apiClient.put(`/api/projects/${id}/layer-mapping`, { mappings });
+  return resp.data;
+}
+
+export async function recognizeDevices(
+  id: string,
+  method = "geometry"
+): Promise<{ devices: Device[]; stats: Record<string, number> }> {
+  const resp = await apiClient.post(`/api/projects/${id}/devices/recognize`, { method });
+  return resp.data;
+}
+
+export async function getDevices(id: string): Promise<{ devices: Device[] }> {
+  const resp = await apiClient.get(`/api/projects/${id}/devices`);
+  return resp.data;
+}
+
+export async function getDevice(id: string, deviceId: string): Promise<Device> {
+  const resp = await apiClient.get(`/api/projects/${id}/devices/${deviceId}`);
   return resp.data;
 }

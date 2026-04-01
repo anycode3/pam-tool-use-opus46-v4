@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ProjectInfo, LayoutData } from "../types";
+import type { ProjectInfo, LayoutData, Device } from "../types";
 import * as projectsApi from "../api/projects";
 
 interface ProjectState {
@@ -8,6 +8,8 @@ interface ProjectState {
   layoutData: LayoutData | null;
   layerMapping: Record<string, string>;
   visibleLayers: Record<string, boolean>;
+  devices: Device[];
+  selectedDevice: Device | null;
   loading: boolean;
   error: string | null;
 
@@ -21,6 +23,9 @@ interface ProjectState {
   setAllLayersHidden: () => void;
   fetchLayerMapping: (projectId: string) => Promise<void>;
   saveLayerMapping: (projectId: string, mappings: Record<string, string>) => Promise<void>;
+  recognizeDevices: (projectId: string) => Promise<void>;
+  selectDevice: (device: Device | null) => void;
+  fetchDevices: (projectId: string) => Promise<void>;
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -29,6 +34,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   layoutData: null,
   layerMapping: {},
   visibleLayers: {},
+  devices: [],
+  selectedDevice: null,
   loading: false,
   error: null,
 
@@ -89,6 +96,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         layoutData: s.currentProject?.id === id ? null : s.layoutData,
         layerMapping: s.currentProject?.id === id ? {} : s.layerMapping,
         visibleLayers: s.currentProject?.id === id ? {} : s.visibleLayers,
+        devices: s.currentProject?.id === id ? [] : s.devices,
+        selectedDevice: s.currentProject?.id === id ? null : s.selectedDevice,
       }));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -143,6 +152,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ error: msg });
+    }
+  },
+
+  recognizeDevices: async (projectId: string) => {
+    set({ loading: true, error: null });
+    try {
+      const { devices } = await projectsApi.recognizeDevices(projectId);
+      set({ devices, selectedDevice: null, loading: false });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      set({ error: msg, loading: false });
+    }
+  },
+
+  selectDevice: (device: Device | null) => {
+    set({ selectedDevice: device });
+  },
+
+  fetchDevices: async (projectId: string) => {
+    try {
+      const { devices } = await projectsApi.getDevices(projectId);
+      set({ devices });
+    } catch {
+      // Devices may not be recognized yet; silently ignore
     }
   },
 }));

@@ -16,6 +16,7 @@ const LAYER_COLORS: Record<number, [number, number, number, number]> = {
 };
 
 const HIGHLIGHT_COLOR: [number, number, number, number] = [255, 255, 0, 220];
+const DEVICE_HIGHLIGHT_COLOR: [number, number, number, number] = [0, 255, 255, 230];
 
 function getLayerColor(layer: number): [number, number, number, number] {
   return (
@@ -26,9 +27,14 @@ function getLayerColor(layer: number): [number, number, number, number] {
 }
 
 export default function LayoutViewer() {
-  const { layoutData, visibleLayers } = useProjectStore();
+  const { layoutData, visibleLayers, selectedDevice } = useProjectStore();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const highlightedPolygonIds = useMemo<Set<string>>(() => {
+    if (!selectedDevice) return new Set();
+    return new Set(selectedDevice.polygon_ids);
+  }, [selectedDevice]);
 
   const initialViewState = useMemo(() => {
     if (!layoutData) return { target: [0, 0, 0] as [number, number, number], zoom: 0 };
@@ -65,16 +71,17 @@ export default function LayoutViewer() {
         data: visibleGeometries,
         getPolygon: (d: Geometry) => d.points as [number, number][],
         getFillColor: (d: Geometry) => {
+          if (highlightedPolygonIds.has(d.id)) return DEVICE_HIGHLIGHT_COLOR;
           if (d.id === selectedId || d.id === hoveredId) return HIGHLIGHT_COLOR;
           return getLayerColor(d.layer);
         },
         pickable: true,
         updateTriggers: {
-          getFillColor: [hoveredId, selectedId],
+          getFillColor: [hoveredId, selectedId, highlightedPolygonIds],
         },
       }),
     ];
-  }, [layoutData, visibleLayers, hoveredId, selectedId]);
+  }, [layoutData, visibleLayers, hoveredId, selectedId, highlightedPolygonIds]);
 
   if (!layoutData) {
     return (

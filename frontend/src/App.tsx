@@ -3,9 +3,10 @@ import FileUpload from "./components/FileUpload";
 import ProjectList from "./components/ProjectList";
 import LayoutViewer from "./components/LayoutViewer";
 import LayerPanel from "./components/LayerPanel";
+import DevicePanel from "./components/DevicePanel";
 import { useProjectStore } from "./store/useProjectStore";
 
-const { Header, Sider, Content, Footer } = Layout;
+const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
 
 export default function App() {
@@ -43,7 +44,7 @@ export default function App() {
         />
       )}
 
-      <Layout>
+      <Layout style={{ flex: 1, overflow: "hidden" }}>
         <Sider width={280} theme="light" style={{ padding: 12, overflowY: "auto" }}>
           <FileUpload />
           <div style={{ marginTop: 16 }}>
@@ -56,11 +57,15 @@ export default function App() {
         <Content style={{ position: "relative", background: "#1a1a2e" }}>
           <LayoutViewer />
         </Content>
-      </Layout>
 
-      <Footer style={{ textAlign: "center", padding: "8px 24px", fontSize: 12 }}>
-        PAM Layout Optimization Tool v0.1
-      </Footer>
+        <Sider
+          width={300}
+          theme="light"
+          style={{ overflowY: "auto", borderLeft: "1px solid #f0f0f0" }}
+        >
+          <DevicePanel />
+        </Sider>
+      </Layout>
     </Layout>
   );
 }

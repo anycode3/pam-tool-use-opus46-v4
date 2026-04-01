@@ -36,3 +36,22 @@ export interface ProjectInfo {
   layer_count?: number;
   geometry_count?: number;
 }
+
+export interface DevicePort {
+  id: string;
+  position: [number, number];
+  layer: string;
+}
+
+export interface Device {
+  id: string;
+  type: "inductor" | "capacitor" | "resistor" | "pad" | "via_gnd";
+  value: number;
+  unit: string;
+  turns?: number;
+  layers: string[];
+  bbox: [number, number, number, number];
+  polygon_ids: string[];
+  ports: DevicePort[];
+  metrics: Record<string, number>;
+}

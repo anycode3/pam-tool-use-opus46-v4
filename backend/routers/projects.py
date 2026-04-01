@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from services.storage import StorageService
 from services.parser import parse_layout
+from services.device_recognition import recognize_devices
 import config
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -14,6 +15,10 @@ VALID_TARGET_LAYERS = {"ME1", "ME2", "TFR", "VA1", "GND"}
 
 class LayerMappingRequest(BaseModel):
     mappings: dict[str, str]
+
+
+class RecognizeRequest(BaseModel):
+    method: str = "geometry"
 
 
 @router.post("/upload")
@@ -142,3 +147,58 @@ def put_layer_mapping(project_id: str, body: LayerMappingRequest):
     data = {"mappings": body.mappings}
     storage.save_json(project_id, "layer_mapping.json", data)
     return data
+
+
+@router.post("/{project_id}/devices/recognize")
+def recognize_project_devices(project_id: str, body: RecognizeRequest):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    if body.method != "geometry":
+        raise HTTPException(400, f"Unsupported recognition method: {body.method}")
+
+    layout_data = storage.load_json(project_id, "layout_data.json")
+    if not layout_data:
+        raise HTTPException(404, "Layout data not found. Upload a file first.")
+
+    mapping_data = storage.load_json(project_id, "layer_mapping.json")
+    if not mapping_data or not mapping_data.get("mappings"):
+        raise HTTPException(400, "Layer mapping not set. Configure layer mapping first.")
+
+    result = recognize_devices(
+        geometries=layout_data.get("geometries", []),
+        layer_mapping=mapping_data["mappings"],
+    )
+
+    storage.save_json(project_id, "devices.json", result)
+    return result
+
+
+@router.get("/{project_id}/devices")
+def list_devices(project_id: str):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    devices_data = storage.load_json(project_id, "devices.json")
+    if not devices_data:
+        return {"devices": []}
+    return {"devices": devices_data.get("devices", [])}
+
+
+@router.get("/{project_id}/devices/{device_id}")
+def get_device(project_id: str, device_id: str):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    devices_data = storage.load_json(project_id, "devices.json")
+    if not devices_data:
+        raise HTTPException(404, "No devices found. Run recognition first.")
+
+    for dev in devices_data.get("devices", []):
+        if dev["id"] == device_id:
+            return dev
+
+    raise HTTPException(404, f"Device {device_id} not found")

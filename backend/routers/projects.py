@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from pathlib import Path
+from pydantic import BaseModel
 
 from services.storage import StorageService
 from services.parser import parse_layout
@@ -7,6 +8,12 @@ import config
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 storage = StorageService()
+
+VALID_TARGET_LAYERS = {"ME1", "ME2", "TFR", "VA1", "GND"}
+
+
+class LayerMappingRequest(BaseModel):
+    mappings: dict[str, str]
 
 
 @router.post("/upload")
@@ -76,3 +83,62 @@ def get_layout(
         ]
 
     return layout_data
+
+
+@router.get("/{project_id}/layers")
+def get_layers(project_id: str):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    layout_data = storage.load_json(project_id, "layout_data.json")
+    if not layout_data:
+        raise HTTPException(404, "Layout data not found. Re-upload the file.")
+
+    layers = []
+    for layer_info in layout_data.get("layers", []):
+        layer_num = layer_info["layer"]
+        datatype = layer_info.get("datatype", 0)
+        name = f"{layer_num}/{datatype}"
+        polygon_count = sum(
+            1 for g in layout_data.get("geometries", [])
+            if g["layer"] == layer_num
+        )
+        layers.append({
+            "layer": layer_num,
+            "datatype": datatype,
+            "name": name,
+            "polygon_count": polygon_count,
+        })
+
+    return {"layers": layers}
+
+
+@router.get("/{project_id}/layer-mapping")
+def get_layer_mapping(project_id: str):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    mapping_data = storage.load_json(project_id, "layer_mapping.json")
+    if not mapping_data:
+        return {"mappings": {}}
+    return mapping_data
+
+
+@router.put("/{project_id}/layer-mapping")
+def put_layer_mapping(project_id: str, body: LayerMappingRequest):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    invalid = [v for v in body.mappings.values() if v not in VALID_TARGET_LAYERS]
+    if invalid:
+        raise HTTPException(
+            400,
+            f"Invalid target layer name(s): {invalid}. Must be one of {sorted(VALID_TARGET_LAYERS)}",
+        )
+
+    data = {"mappings": body.mappings}
+    storage.save_json(project_id, "layer_mapping.json", data)
+    return data

@@ -2,6 +2,7 @@ import { Layout, Typography, Spin, Alert } from "antd";
 import FileUpload from "./components/FileUpload";
 import ProjectList from "./components/ProjectList";
 import LayoutViewer from "./components/LayoutViewer";
+import LayerPanel from "./components/LayerPanel";
 import { useProjectStore } from "./store/useProjectStore";
 
 const { Header, Sider, Content, Footer } = Layout;
@@ -49,6 +50,7 @@ export default function App() {
             <Typography.Text strong>项目列表</Typography.Text>
             <ProjectList />
           </div>
+          <LayerPanel />
         </Sider>
 
         <Content style={{ position: "relative", background: "#1a1a2e" }}>

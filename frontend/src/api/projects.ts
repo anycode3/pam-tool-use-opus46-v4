@@ -1,5 +1,5 @@
 import apiClient from "./client";
-import type { ProjectInfo, LayoutData } from "../types";
+import type { ProjectInfo, LayoutData, LayerInfo } from "../types";
 
 export async function uploadFile(file: File): Promise<ProjectInfo> {
   const formData = new FormData();
@@ -31,5 +31,23 @@ export async function getLayout(
     params.layers = layers.join(",");
   }
   const resp = await apiClient.get(`/api/projects/${id}/layout`, { params });
+  return resp.data;
+}
+
+export async function getLayers(id: string): Promise<{ layers: LayerInfo[] }> {
+  const resp = await apiClient.get(`/api/projects/${id}/layers`);
+  return resp.data;
+}
+
+export async function getLayerMapping(id: string): Promise<{ mappings: Record<string, string> }> {
+  const resp = await apiClient.get(`/api/projects/${id}/layer-mapping`);
+  return resp.data;
+}
+
+export async function saveLayerMapping(
+  id: string,
+  mappings: Record<string, string>
+): Promise<{ mappings: Record<string, string> }> {
+  const resp = await apiClient.put(`/api/projects/${id}/layer-mapping`, { mappings });
   return resp.data;
 }

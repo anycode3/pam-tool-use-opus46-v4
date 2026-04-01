@@ -26,7 +26,7 @@ function getLayerColor(layer: number): [number, number, number, number] {
 }
 
 export default function LayoutViewer() {
-  const { layoutData } = useProjectStore();
+  const { layoutData, visibleLayers } = useProjectStore();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -53,10 +53,16 @@ export default function LayoutViewer() {
   const layers = useMemo(() => {
     if (!layoutData || layoutData.geometries.length === 0) return [];
 
+    const visibleGeometries = layoutData.geometries.filter((g) => {
+      const layerName = `${g.layer}/${g.datatype}`;
+      // If visibleLayers has an entry, respect it; otherwise show by default
+      return layerName in visibleLayers ? visibleLayers[layerName] : true;
+    });
+
     return [
       new SolidPolygonLayer<Geometry>({
         id: "layout-polygons",
-        data: layoutData.geometries,
+        data: visibleGeometries,
         getPolygon: (d: Geometry) => d.points as [number, number][],
         getFillColor: (d: Geometry) => {
           if (d.id === selectedId || d.id === hoveredId) return HIGHLIGHT_COLOR;
@@ -68,7 +74,7 @@ export default function LayoutViewer() {
         },
       }),
     ];
-  }, [layoutData, hoveredId, selectedId]);
+  }, [layoutData, visibleLayers, hoveredId, selectedId]);
 
   if (!layoutData) {
     return (

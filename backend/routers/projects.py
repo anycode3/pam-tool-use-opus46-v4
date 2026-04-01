@@ -1,10 +1,14 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
+from fastapi.responses import FileResponse
 from pathlib import Path
 from pydantic import BaseModel
 
 from services.storage import StorageService
 from services.parser import parse_layout
 from services.device_recognition import recognize_devices
+from services.device_modifier import modify_device, apply_modifications
+from services.layout_diff import compute_diff
+from services.layout_writer import write_layout
 import config
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -19,6 +23,16 @@ class LayerMappingRequest(BaseModel):
 
 class RecognizeRequest(BaseModel):
     method: str = "geometry"
+
+
+class ModifyDeviceRequest(BaseModel):
+    new_value: float
+    mode: str = "auto"
+    manual_params: dict | None = None
+
+
+class ApplyModificationsRequest(BaseModel):
+    modifications: list[str]
 
 
 @router.post("/upload")
@@ -202,3 +216,141 @@ def get_device(project_id: str, device_id: str):
             return dev
 
     raise HTTPException(404, f"Device {device_id} not found")
+
+
+@router.post("/{project_id}/devices/{device_id}/modify")
+def modify_project_device(project_id: str, device_id: str, body: ModifyDeviceRequest):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    devices_data = storage.load_json(project_id, "devices.json")
+    if not devices_data:
+        raise HTTPException(404, "No devices found. Run recognition first.")
+
+    device = None
+    for dev in devices_data.get("devices", []):
+        if dev["id"] == device_id:
+            device = dev
+            break
+    if device is None:
+        raise HTTPException(404, f"Device {device_id} not found")
+
+    layout_data = storage.load_json(project_id, "layout_data.json")
+    if not layout_data:
+        raise HTTPException(404, "Layout data not found.")
+
+    try:
+        modification = modify_device(
+            device=device,
+            layout_data=layout_data,
+            new_value=body.new_value,
+            mode=body.mode,
+            manual_params=body.manual_params,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    # Store modification previews
+    mods_data = storage.load_json(project_id, "modifications.json") or {"modifications": []}
+    mods_data["modifications"].append(modification)
+    storage.save_json(project_id, "modifications.json", mods_data)
+
+    return modification
+
+
+@router.post("/{project_id}/apply-modifications")
+def apply_project_modifications(project_id: str, body: ApplyModificationsRequest):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    layout_data = storage.load_json(project_id, "layout_data.json")
+    if not layout_data:
+        raise HTTPException(404, "Layout data not found.")
+
+    mods_data = storage.load_json(project_id, "modifications.json")
+    if not mods_data:
+        raise HTTPException(404, "No modifications found.")
+
+    # Filter to requested modification IDs
+    requested_ids = set(body.modifications)
+    selected_mods = [
+        m for m in mods_data.get("modifications", [])
+        if m["id"] in requested_ids
+    ]
+    if not selected_mods:
+        raise HTTPException(400, "None of the specified modifications were found.")
+
+    # Store original layout for diff
+    storage.save_json(project_id, "layout_data_original.json", layout_data)
+
+    # Apply modifications
+    modified_layout = apply_modifications(layout_data, selected_mods)
+    storage.save_json(project_id, "layout_data.json", modified_layout)
+
+    # Write modified file
+    file_type = info.get("file_type", "gds")
+    project_dir = storage.get_project_dir(project_id)
+    output_path = project_dir / f"modified.{file_type}"
+    write_layout(modified_layout, str(output_path), file_type)
+
+    return {
+        "status": "applied",
+        "modifications_applied": len(selected_mods),
+        "download_url": f"/api/projects/{project_id}/download",
+    }
+
+
+@router.get("/{project_id}/diff")
+def get_project_diff(project_id: str):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    original = storage.load_json(project_id, "layout_data_original.json")
+    if not original:
+        raise HTTPException(404, "No original layout data found. Apply modifications first.")
+
+    current = storage.load_json(project_id, "layout_data.json")
+    if not current:
+        raise HTTPException(404, "Layout data not found.")
+
+    changes = compute_diff(
+        original.get("geometries", []),
+        current.get("geometries", []),
+    )
+
+    return {"changes": changes}
+
+
+@router.get("/{project_id}/download")
+def download_project(project_id: str):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    file_type = info.get("file_type", "gds")
+    project_dir = storage.get_project_dir(project_id)
+
+    # Prefer modified file, fall back to original
+    modified_file = project_dir / f"modified.{file_type}"
+    original_file = project_dir / f"original.{file_type}"
+
+    if modified_file.exists():
+        target = modified_file
+    elif original_file.exists():
+        target = original_file
+    else:
+        raise HTTPException(404, "No layout file found.")
+
+    media_type = "application/octet-stream"
+    filename = f"{info.get('name', 'layout')}"
+    if not filename.endswith(f".{file_type}"):
+        filename = f"layout.{file_type}"
+
+    return FileResponse(
+        path=str(target),
+        media_type=media_type,
+        filename=filename,
+    )

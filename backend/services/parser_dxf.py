@@ -6,11 +6,6 @@ def parse_dxf(file_path: str) -> dict:
     doc = ezdxf.readfile(file_path)
     msp = doc.modelspace()
 
-    # Build a layer name -> integer index mapping
-    layer_index: dict[str, int] = {}
-    for i, layer_def in enumerate(doc.layers):
-        layer_index[layer_def.dxf.name] = i
-
     geometries = []
     layer_stats: dict[str, int] = {}
     all_x: list[float] = []
@@ -23,16 +18,15 @@ def parse_dxf(file_path: str) -> dict:
             continue
 
         layer_name = entity.dxf.layer
-        layer_num = layer_index.get(layer_name, 0)
 
         geo_id = f"poly_{poly_idx:06d}"
         geometries.append({
             "id": geo_id,
             "type": "polygon",
-            "layer": layer_num,
+            "layer": layer_name,
             "datatype": 0,
             "points": points,
-            "properties": {"dxf_layer": layer_name},
+            "properties": {},
         })
         poly_idx += 1
 
@@ -58,7 +52,7 @@ def parse_dxf(file_path: str) -> dict:
     layers = []
     for name, count in sorted(layer_stats.items()):
         layers.append({
-            "layer": layer_index.get(name, 0),
+            "layer": name,
             "datatype": 0,
             "name": name,
             "polygon_count": count,

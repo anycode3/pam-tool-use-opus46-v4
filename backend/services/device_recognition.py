@@ -49,7 +49,13 @@ def recognize_devices(
     }
 
     for geo in geometries:
-        key = f"{geo['layer']}/{geo.get('datatype', 0)}"
+        layer = geo['layer']
+        # Handle both integer (GDS) and string (DXF) layer identifiers
+        if isinstance(layer, int):
+            key = f"{layer}/{geo.get('datatype', 0)}"
+        else:
+            key = str(layer)
+
         target = layer_mapping.get(key)
         if target and target in layer_geos:
             layer_geos[target].append(geo)

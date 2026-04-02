@@ -6,7 +6,7 @@ export interface Bounds {
 }
 
 export interface LayerInfo {
-  layer: number;
+  layer: number | string;
   datatype: number;
   name: string;
   polygon_count: number;
@@ -15,7 +15,7 @@ export interface LayerInfo {
 export interface Geometry {
   id: string;
   type: string;
-  layer: number;
+  layer: number | string;
   datatype: number;
   points: number[][];
   properties: Record<string, unknown>;

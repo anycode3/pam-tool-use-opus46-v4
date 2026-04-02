@@ -4,32 +4,35 @@ import { SolidPolygonLayer, ScatterplotLayer } from "deck.gl";
 import { useProjectStore } from "../store/useProjectStore";
 import type { Geometry, DrcViolation } from "../types";
 
-const LAYER_COLORS: Record<number, [number, number, number, number]> = {
-  0: [65, 105, 225, 160],
-  1: [220, 20, 60, 160],
-  2: [50, 205, 50, 160],
-  3: [255, 165, 0, 160],
-  4: [148, 103, 189, 160],
-  5: [255, 215, 0, 160],
-  6: [0, 206, 209, 160],
-  7: [255, 99, 71, 160],
-};
+const LAYER_COLORS: [number, number, number, number][] = [
+  [65, 105, 225, 160],      // Royal blue
+  [220, 20, 60, 160],       // Crimson
+  [50, 205, 50, 160],       // Lime green
+  [255, 165, 0, 160],       // Orange
+  [148, 103, 189, 160],     // Medium purple
+  [255, 215, 0, 160],       // Gold
+  [0, 206, 209, 160],       // Dark turquoise
+  [255, 99, 71, 160],       // Tomato
+];
 
+const DEFAULT_COLOR: [number, number, number, number] = [128, 128, 128, 160];
 const HIGHLIGHT_COLOR: [number, number, number, number] = [255, 255, 0, 220];
 const DEVICE_HIGHLIGHT_COLOR: [number, number, number, number] = [0, 255, 255, 230];
-
-function getLayerColor(layer: number): [number, number, number, number] {
-  return (
-    LAYER_COLORS[layer % Object.keys(LAYER_COLORS).length] ?? [
-      128, 128, 128, 160,
-    ]
-  );
-}
 
 export default function LayoutViewer() {
   const { layoutData, visibleLayers, selectedDevice, drcResults, highlightedViolationPolygonId } = useProjectStore();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Build a stable color index: layer name -> palette index
+  const layerColorMap = useMemo<Record<string, [number, number, number, number]>>(() => {
+    if (!layoutData) return {};
+    const map: Record<string, [number, number, number, number]> = {};
+    layoutData.layers.forEach((l, i) => {
+      map[l.name] = LAYER_COLORS[i % LAYER_COLORS.length];
+    });
+    return map;
+  }, [layoutData]);
 
   const highlightedPolygonIds = useMemo<Set<string>>(() => {
     if (!selectedDevice) return new Set();
@@ -65,8 +68,11 @@ export default function LayoutViewer() {
     if (!layoutData || layoutData.geometries.length === 0) return [];
 
     const visibleGeometries = layoutData.geometries.filter((g) => {
-      const layerName = `${g.layer}/${g.datatype}`;
-      // If visibleLayers has an entry, respect it; otherwise show by default
+      // For GDS: layer is number, name format is "layer/datatype"
+      // For DXF: layer is string, name format is the layer name itself
+      const layerName = typeof g.layer === "number"
+        ? `${g.layer}/${g.datatype}`
+        : String(g.layer);
       return layerName in visibleLayers ? visibleLayers[layerName] : true;
     });
 
@@ -79,11 +85,14 @@ export default function LayoutViewer() {
         if (violationPolygonIds.has(d.id)) return [255, 100, 50, 180];
         if (highlightedPolygonIds.has(d.id)) return DEVICE_HIGHLIGHT_COLOR;
         if (d.id === selectedId || d.id === hoveredId) return HIGHLIGHT_COLOR;
-        return getLayerColor(d.layer);
+        const layerName = typeof d.layer === "number"
+          ? `${d.layer}/${d.datatype}`
+          : String(d.layer);
+        return layerColorMap[layerName] ?? DEFAULT_COLOR;
       },
       pickable: true,
       updateTriggers: {
-        getFillColor: [hoveredId, selectedId, highlightedPolygonIds, violationPolygonIds, highlightedViolationPolygonId],
+        getFillColor: [hoveredId, selectedId, highlightedPolygonIds, violationPolygonIds, highlightedViolationPolygonId, layerColorMap],
       },
     });
 

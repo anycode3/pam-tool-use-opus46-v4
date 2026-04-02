@@ -98,7 +98,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       for (const layer of layoutData.layers) {
         visibleLayers[layer.name] = true;
       }
-      set({ currentProject: project, layoutData, visibleLayers, loading: false });
+      set({ currentProject: project, layoutData, visibleLayers, loading: false,
+        devices: [], selectedDevice: null,
+        modifications: [], diffChanges: [],
+        drcResults: null, drcRules: [], highlightedViolationPolygonId: null,
+      });
       // Fetch layer mapping in background (don't block loading)
       get().fetchLayerMapping(id).catch(() => {/* ignore errors */});
     } catch (e: unknown) {

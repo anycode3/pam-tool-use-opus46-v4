@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import {
   Button,
@@ -9,6 +9,7 @@ import {
   Alert,
   Descriptions,
   Empty,
+  Space,
 } from "antd";
 import {
   ThunderboltOutlined,
@@ -16,6 +17,9 @@ import {
   MinusCircleOutlined,
   PushpinOutlined,
   ApartmentOutlined,
+  DownloadOutlined,
+  DeleteOutlined,
+  CheckCircleOutlined,
 } from "@ant-design/icons";
 import { useProjectStore } from "../store/useProjectStore";
 import type { Device } from "../types";
@@ -142,10 +146,22 @@ export default function DevicePanel() {
     selectedDevice,
     recognizeDevices,
     selectDevice,
+    modifications,
+    applyModifications,
+    downloadLayout,
+    clearModifications,
     loading,
   } = useProjectStore();
 
   const [recognizing, setRecognizing] = useState(false);
+  const [applied, setApplied] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  // Reset applied state when modifications change
+  useEffect(() => {
+    setApplied(false);
+  }, [modifications.length]);
 
   const hasMappings = Object.keys(layerMapping).length > 0;
 
@@ -196,6 +212,24 @@ export default function DevicePanel() {
     })
   );
 
+  const handleApplyAll = async () => {
+    setApplying(true);
+    await applyModifications();
+    setApplied(true);
+    setApplying(false);
+  };
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    await downloadLayout();
+    setDownloading(false);
+  };
+
+  const handleClear = () => {
+    clearModifications();
+    setApplied(false);
+  };
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: 12 }}>
       <Text strong style={{ fontSize: 14, marginBottom: 8, display: "block" }}>
@@ -243,6 +277,89 @@ export default function DevicePanel() {
 
           {selectedDevice && (
             <DeviceModifyPanel device={selectedDevice} />
+          )}
+
+          {modifications.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <Divider style={{ margin: "8px 0" }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <Text strong style={{ fontSize: 13 }}>修改汇总</Text>
+                <Tag color="blue">{modifications.length} 项</Tag>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+                {modifications.map((m) => (
+                  <div
+                    key={m.id}
+                    style={{
+                      fontSize: 11,
+                      padding: "4px 8px",
+                      background: "#fafafa",
+                      borderRadius: 4,
+                      border: "1px solid #f0f0f0",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span>
+                      <Tag
+                        color={DEVICE_TYPE_COLORS[m.device_type as Device["type"]] ?? "default"}
+                        style={{ fontSize: 10, margin: 0, marginRight: 6 }}
+                      >
+                        {DEVICE_TYPE_LABELS[m.device_type as Device["type"]] ?? m.device_type}
+                      </Tag>
+                      {m.old_value} → {m.new_value}
+                    </span>
+                    <Text type="secondary" style={{ fontSize: 10 }}>{m.changes.length} poly</Text>
+                  </div>
+                ))}
+              </div>
+
+              <Space style={{ width: "100%" }} direction="vertical" size={6}>
+                {applied ? (
+                  <>
+                    <Alert
+                      type="success"
+                      icon={<CheckCircleOutlined />}
+                      message="已应用全部修改"
+                      showIcon
+                      style={{ fontSize: 12 }}
+                    />
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<DownloadOutlined />}
+                      style={{ width: "100%" }}
+                      loading={downloading}
+                      onClick={handleDownload}
+                    >
+                      下载修改后版图
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="primary"
+                    size="small"
+                    style={{ width: "100%" }}
+                    loading={applying}
+                    onClick={handleApplyAll}
+                  >
+                    应用全部修改
+                  </Button>
+                )}
+                <Button
+                  size="small"
+                  danger
+                  ghost
+                  icon={<DeleteOutlined />}
+                  style={{ width: "100%" }}
+                  onClick={handleClear}
+                >
+                  清除修改
+                </Button>
+              </Space>
+            </div>
           )}
 
           <DiffViewer />

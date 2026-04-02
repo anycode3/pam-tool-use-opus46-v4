@@ -6,12 +6,11 @@ import {
   Space,
   Typography,
   Divider,
-  Alert,
   Descriptions,
 } from "antd";
-import { DownloadOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useProjectStore } from "../store/useProjectStore";
 import type { Device, Modification } from "../types";
+import PolygonDiffPreview from "./PolygonDiffPreview";
 
 const { Text } = Typography;
 
@@ -20,42 +19,24 @@ interface DeviceModifyPanelProps {
 }
 
 export default function DeviceModifyPanel({ device }: DeviceModifyPanelProps) {
-  const { modifyDevice, applyModifications, downloadLayout, modifications, loading } = useProjectStore();
+  const { modifyDevice, modifications, loading } = useProjectStore();
 
   const [newValue, setNewValue] = useState<number>(device.value);
   const [mode, setMode] = useState<"auto" | "manual">("auto");
   const [manualWidth, setManualWidth] = useState<number>(1.0);
   const [manualLength, setManualLength] = useState<number>(1.0);
   const [preview, setPreview] = useState<Modification | null>(null);
-  const [applied, setApplied] = useState(false);
   const [previewing, setPreviewing] = useState(false);
-  const [applying, setApplying] = useState(false);
-  const [downloading, setDownloading] = useState(false);
 
   // Find latest modification for this device in the store
   const latestMod = modifications.filter((m) => m.device_id === device.id).at(-1);
 
   const handlePreview = async () => {
     setPreviewing(true);
-    setApplied(false);
     setPreview(null);
     const manualParams = mode === "manual" ? { width: manualWidth, length: manualLength } : undefined;
     await modifyDevice(device.id, newValue, mode, manualParams);
-    // After modifyDevice resolves, the modification is in store; read it from store
     setPreviewing(false);
-  };
-
-  const handleApply = async () => {
-    setApplying(true);
-    await applyModifications();
-    setApplied(true);
-    setApplying(false);
-  };
-
-  const handleDownload = async () => {
-    setDownloading(true);
-    await downloadLayout();
-    setDownloading(false);
   };
 
   // Use store's latestMod as the preview result after previewing
@@ -156,40 +137,8 @@ export default function DeviceModifyPanel({ device }: DeviceModifyPanelProps) {
                 {mod.changes.length}
               </Descriptions.Item>
             </Descriptions>
-
-            {applied ? (
-              <Alert
-                type="success"
-                icon={<CheckCircleOutlined />}
-                message="已应用修改"
-                showIcon
-                style={{ marginTop: 8, fontSize: 12 }}
-              />
-            ) : (
-              <Button
-                type="default"
-                size="small"
-                style={{ width: "100%", marginTop: 8 }}
-                loading={applying}
-                onClick={handleApply}
-              >
-                应用修改
-              </Button>
-            )}
+            <PolygonDiffPreview changes={mod.changes} />
           </div>
-        )}
-
-        {applied && (
-          <Button
-            type="primary"
-            size="small"
-            icon={<DownloadOutlined />}
-            style={{ width: "100%" }}
-            loading={downloading}
-            onClick={handleDownload}
-          >
-            下载修改后版图
-          </Button>
         )}
       </Space>
     </div>

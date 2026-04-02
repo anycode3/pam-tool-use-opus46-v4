@@ -10,7 +10,7 @@ import {
   Descriptions,
   Empty,
   Space,
-  Drawer,
+  Popover,
 } from "antd";
 import {
   ThunderboltOutlined,
@@ -78,12 +78,34 @@ interface DeviceItemProps {
   device: Device;
   isSelected: boolean;
   onClick: () => void;
-  onModify: () => void;
+  onPopoverChange: (open: boolean) => void;
+  popoverOpen: boolean;
 }
 
-function DeviceItem({ device, isSelected, onClick, onModify }: DeviceItemProps) {
+function DeviceItem({ device, isSelected, onClick, onPopoverChange, popoverOpen }: DeviceItemProps) {
   const label = DEVICE_TYPE_LABELS[device.type];
   const color = DEVICE_TYPE_COLORS[device.type];
+
+  const editButton = MODIFIABLE_TYPES.has(device.type) ? (
+    <Popover
+      placement="left"
+      trigger="click"
+      open={popoverOpen}
+      onOpenChange={onPopoverChange}
+      title={`修改 ${DEVICE_TYPE_LABELS[device.type]}`}
+      content={<DeviceModifyPanel device={device} />}
+      overlayStyle={{ width: 280 }}
+      destroyTooltipOnHide
+    >
+      <Button
+        size="small"
+        type="link"
+        icon={<EditOutlined />}
+        style={{ fontSize: 11, padding: 0, height: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      />
+    </Popover>
+  ) : null;
 
   return (
     <div
@@ -105,18 +127,7 @@ function DeviceItem({ device, isSelected, onClick, onModify }: DeviceItemProps) 
         <Text style={{ fontSize: 12, flex: 1 }}>
           {formatValue(device.value, device.unit)}
         </Text>
-        {MODIFIABLE_TYPES.has(device.type) && (
-          <Button
-            size="small"
-            type="link"
-            icon={<EditOutlined />}
-            style={{ fontSize: 11, padding: 0, height: "auto" }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onModify();
-            }}
-          />
-        )}
+        {editButton}
         <Text type="secondary" style={{ fontSize: 11 }}>
           {device.polygon_ids.length} poly
         </Text>
@@ -175,8 +186,7 @@ export default function DevicePanel() {
   const [applied, setApplied] = useState(false);
   const [applying, setApplying] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editingDevice, setEditingDevice] = useState<Device | null>(null);
+  const [popoverDeviceId, setPopoverDeviceId] = useState<string | null>(null);
 
   // Reset applied state when modifications change
   useEffect(() => {
@@ -200,16 +210,15 @@ export default function DevicePanel() {
     { inductor: [], capacitor: [], resistor: [], pad: [], via_gnd: [] }
   );
 
-  const handleOpenModify = (device: Device) => {
-    selectDevice(device);
-    setEditingDevice(device);
-    setDrawerOpen(true);
-  };
-
-  const handleCloseDrawer = () => {
-    setDrawerOpen(false);
-    setEditingDevice(null);
-    clearModificationPreview();
+  const handlePopoverChange = (deviceId: string, open: boolean) => {
+    if (open) {
+      setPopoverDeviceId(deviceId);
+      const device = devices.find((d) => d.id === deviceId);
+      if (device) selectDevice(device);
+    } else {
+      setPopoverDeviceId(null);
+      clearModificationPreview();
+    }
   };
 
   const collapseItems = GROUP_ORDER.filter((type) => grouped[type].length > 0).map(
@@ -237,7 +246,8 @@ export default function DevicePanel() {
               onClick={() =>
                 selectDevice(selectedDevice?.id === device.id ? null : device)
               }
-              onModify={() => handleOpenModify(device)}
+              popoverOpen={popoverDeviceId === device.id}
+              onPopoverChange={(open) => handlePopoverChange(device.id, open)}
             />
           ))}
         </div>
@@ -394,17 +404,6 @@ export default function DevicePanel() {
           <DiffViewer />
         </div>
       )}
-
-      <Drawer
-        title={editingDevice ? `修改 ${DEVICE_TYPE_LABELS[editingDevice.type]} ${editingDevice.id}` : "修改器件"}
-        placement="right"
-        width={320}
-        open={drawerOpen}
-        onClose={handleCloseDrawer}
-        destroyOnClose
-      >
-        {editingDevice && <DeviceModifyPanel device={editingDevice} />}
-      </Drawer>
     </div>
   );
 }

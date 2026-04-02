@@ -69,30 +69,58 @@ def recognize_devices(
         dev_counter += 1
         return f"dev_{dev_counter:03d}"
 
-    # 1. Inductors (spiral detection on ME1/ME2)
-    for layer_name in ("ME1", "ME2"):
-        for geo in layer_geos[layer_name]:
-            if geo["id"] in used_ids:
+    # 1. Inductors (spiral detection on both ME1 and ME2 overlapping)
+    me1_spirals = []
+    for geo in layer_geos["ME1"]:
+        if geo["id"] in used_ids:
+            continue
+        pts = geo["points"]
+        if _is_inductor_shape(pts):
+            me1_spirals.append(geo)
+
+    me2_spirals = []
+    for geo in layer_geos["ME2"]:
+        if geo["id"] in used_ids:
+            continue
+        pts = geo["points"]
+        if _is_inductor_shape(pts):
+            me2_spirals.append(geo)
+
+    # Match ME1 spirals with overlapping ME2 spirals
+    for g1 in me1_spirals:
+        if g1["id"] in used_ids:
+            continue
+        bb1 = polygon_bbox(g1["points"])
+        for g2 in me2_spirals:
+            if g2["id"] in used_ids:
                 continue
-            pts = geo["points"]
-            if _is_inductor_shape(pts):
-                turns = _estimate_turns(pts)
-                bbox = polygon_bbox(pts)
-                w, h = bbox_dimensions(bbox)
+            bb2 = polygon_bbox(g2["points"])
+            # Check if the two spirals overlap significantly
+            ov = overlap_area(bb1, bb2)
+            min_area = min(polygon_area(g1["points"]), polygon_area(g2["points"]))
+            if ov > 0 and min_area > 0 and ov / min_area > 0.5:
+                # Found a matching pair
+                turns = _estimate_turns(g1["points"])
+                combined_bbox = [
+                    min(bb1[0], bb2[0]), min(bb1[1], bb2[1]),
+                    max(bb1[2], bb2[2]), max(bb1[3], bb2[3]),
+                ]
                 value = turns * INDUCTANCE_PER_TURN_NH
                 dev = _make_device(
                     dev_id=next_id(),
                     dev_type="inductor",
                     value=round(value, 3),
                     unit="nH",
-                    layers=[layer_name],
-                    bbox=bbox,
-                    polygon_ids=[geo["id"]],
-                    points_list=[pts],
+                    layers=["ME1", "ME2"],
+                    bbox=combined_bbox,
+                    polygon_ids=[g1["id"], g2["id"]],
+                    points_list=[g1["points"], g2["points"]],
                     extra={"turns": turns},
                 )
                 devices.append(dev)
-                used_ids.add(geo["id"])
+                used_ids.add(g1["id"])
+                used_ids.add(g2["id"])
+                break  # each ME1 spiral matched to at most one ME2 spiral
 
     # 2. Capacitors (overlapping rectangles on ME1 and ME2)
     me1_rects = [g for g in layer_geos["ME1"]

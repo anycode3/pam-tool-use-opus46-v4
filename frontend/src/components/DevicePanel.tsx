@@ -10,6 +10,7 @@ import {
   Descriptions,
   Empty,
   Space,
+  Drawer,
 } from "antd";
 import {
   ThunderboltOutlined,
@@ -20,6 +21,7 @@ import {
   DownloadOutlined,
   DeleteOutlined,
   CheckCircleOutlined,
+  EditOutlined,
 } from "@ant-design/icons";
 import { useProjectStore } from "../store/useProjectStore";
 import type { Device } from "../types";
@@ -70,13 +72,16 @@ function formatValue(value: number, unit: string): string {
   return `${value} ${unit}`;
 }
 
+const MODIFIABLE_TYPES: Set<Device["type"]> = new Set(["inductor", "capacitor", "resistor"]);
+
 interface DeviceItemProps {
   device: Device;
   isSelected: boolean;
   onClick: () => void;
+  onModify: () => void;
 }
 
-function DeviceItem({ device, isSelected, onClick }: DeviceItemProps) {
+function DeviceItem({ device, isSelected, onClick, onModify }: DeviceItemProps) {
   const label = DEVICE_TYPE_LABELS[device.type];
   const color = DEVICE_TYPE_COLORS[device.type];
 
@@ -100,6 +105,18 @@ function DeviceItem({ device, isSelected, onClick }: DeviceItemProps) {
         <Text style={{ fontSize: 12, flex: 1 }}>
           {formatValue(device.value, device.unit)}
         </Text>
+        {MODIFIABLE_TYPES.has(device.type) && (
+          <Button
+            size="small"
+            type="link"
+            icon={<EditOutlined />}
+            style={{ fontSize: 11, padding: 0, height: "auto" }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onModify();
+            }}
+          />
+        )}
         <Text type="secondary" style={{ fontSize: 11 }}>
           {device.polygon_ids.length} poly
         </Text>
@@ -150,6 +167,7 @@ export default function DevicePanel() {
     applyModifications,
     downloadLayout,
     clearModifications,
+    clearModificationPreview,
     loading,
   } = useProjectStore();
 
@@ -157,6 +175,8 @@ export default function DevicePanel() {
   const [applied, setApplied] = useState(false);
   const [applying, setApplying] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingDevice, setEditingDevice] = useState<Device | null>(null);
 
   // Reset applied state when modifications change
   useEffect(() => {
@@ -179,6 +199,18 @@ export default function DevicePanel() {
     },
     { inductor: [], capacitor: [], resistor: [], pad: [], via_gnd: [] }
   );
+
+  const handleOpenModify = (device: Device) => {
+    selectDevice(device);
+    setEditingDevice(device);
+    setDrawerOpen(true);
+  };
+
+  const handleCloseDrawer = () => {
+    setDrawerOpen(false);
+    setEditingDevice(null);
+    clearModificationPreview();
+  };
 
   const collapseItems = GROUP_ORDER.filter((type) => grouped[type].length > 0).map(
     (type) => ({
@@ -205,6 +237,7 @@ export default function DevicePanel() {
               onClick={() =>
                 selectDevice(selectedDevice?.id === device.id ? null : device)
               }
+              onModify={() => handleOpenModify(device)}
             />
           ))}
         </div>
@@ -274,10 +307,6 @@ export default function DevicePanel() {
             size="small"
             style={{ background: "transparent" }}
           />
-
-          {selectedDevice && (
-            <DeviceModifyPanel device={selectedDevice} />
-          )}
 
           {modifications.length > 0 && (
             <div style={{ marginTop: 12 }}>
@@ -365,6 +394,17 @@ export default function DevicePanel() {
           <DiffViewer />
         </div>
       )}
+
+      <Drawer
+        title={editingDevice ? `修改 ${DEVICE_TYPE_LABELS[editingDevice.type]} ${editingDevice.id}` : "修改器件"}
+        placement="right"
+        width={320}
+        open={drawerOpen}
+        onClose={handleCloseDrawer}
+        destroyOnClose
+      >
+        {editingDevice && <DeviceModifyPanel device={editingDevice} />}
+      </Drawer>
     </div>
   );
 }

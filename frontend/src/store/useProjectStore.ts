@@ -11,6 +11,7 @@ interface ProjectState {
   devices: Device[];
   selectedDevice: Device | null;
   modifications: Modification[];
+  modificationPreview: Modification | null;
   diffChanges: DiffChange[];
   drcRules: DrcRule[];
   drcResults: DrcResults | null;
@@ -36,6 +37,7 @@ interface ProjectState {
   fetchDiff: () => Promise<void>;
   downloadLayout: () => Promise<void>;
   clearModifications: () => void;
+  clearModificationPreview: () => void;
   saveDrcRules: (rules: DrcRule[]) => Promise<void>;
   fetchDrcRules: () => Promise<void>;
   runDrc: () => Promise<void>;
@@ -52,6 +54,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   devices: [],
   selectedDevice: null,
   modifications: [],
+  modificationPreview: null,
   diffChanges: [],
   drcRules: [],
   drcResults: null,
@@ -100,7 +103,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       set({ currentProject: project, layoutData, visibleLayers, loading: false,
         devices: [], selectedDevice: null,
-        modifications: [], diffChanges: [],
+        modifications: [], modificationPreview: null, diffChanges: [],
         drcResults: null, drcRules: [], highlightedViolationPolygonId: null,
       });
       // Fetch layer mapping in background (don't block loading)
@@ -213,7 +216,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         mode,
         manual_params: manualParams,
       });
-      set((s) => ({ modifications: [...s.modifications, modification], loading: false }));
+      set((s) => ({ modifications: [...s.modifications, modification], modificationPreview: modification, loading: false }));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ error: msg, loading: false });
@@ -267,7 +270,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  clearModifications: () => set({ modifications: [], diffChanges: [] }),
+  clearModifications: () => set({ modifications: [], modificationPreview: null, diffChanges: [] }),
+
+  clearModificationPreview: () => set({ modificationPreview: null }),
 
   saveDrcRules: async (rules: DrcRule[]) => {
     const { currentProject } = get();

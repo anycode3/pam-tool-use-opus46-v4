@@ -5,11 +5,11 @@ import {
   Radio,
   Space,
   Typography,
-  Descriptions,
   Alert,
 } from "antd";
+import { PlusOutlined } from "@ant-design/icons";
 import { useProjectStore } from "../store/useProjectStore";
-import type { Device, Modification } from "../types";
+import type { Device } from "../types";
 
 const { Text } = Typography;
 
@@ -18,7 +18,7 @@ interface DeviceModifyPanelProps {
 }
 
 export default function DeviceModifyPanel({ device }: DeviceModifyPanelProps) {
-  const { modifyDevice, modifications, loading } = useProjectStore();
+  const { modifyDevice, modificationPreview, confirmModification, modifications, loading } = useProjectStore();
 
   const [newValue, setNewValue] = useState<number>(device.value);
   const [mode, setMode] = useState<"auto" | "manual">("auto");
@@ -26,13 +26,18 @@ export default function DeviceModifyPanel({ device }: DeviceModifyPanelProps) {
   const [manualLength, setManualLength] = useState<number>(1.0);
   const [previewing, setPreviewing] = useState(false);
 
-  const latestMod = modifications.filter((m) => m.device_id === device.id).at(-1);
+  const alreadyAdded = modifications.some((m) => m.device_id === device.id);
+  const hasPreview = modificationPreview?.device_id === device.id;
 
   const handlePreview = async () => {
     setPreviewing(true);
     const manualParams = mode === "manual" ? { width: manualWidth, length: manualLength } : undefined;
     await modifyDevice(device.id, newValue, mode, manualParams);
     setPreviewing(false);
+  };
+
+  const handleConfirm = () => {
+    confirmModification();
   };
 
   return (
@@ -103,12 +108,33 @@ export default function DeviceModifyPanel({ device }: DeviceModifyPanelProps) {
         预览修改
       </Button>
 
-      {latestMod && (
+      {hasPreview && (
+        <>
+          <Alert
+            type="info"
+            showIcon
+            message={`${modificationPreview.old_value} → ${modificationPreview.new_value} ${device.unit}，${modificationPreview.changes.length} 个多边形变更`}
+            description="版图中已高亮显示对比（红=修改前，绿=修改后）"
+            style={{ fontSize: 12 }}
+          />
+          <Button
+            type="primary"
+            size="small"
+            icon={<PlusOutlined />}
+            style={{ width: "100%" }}
+            onClick={handleConfirm}
+          >
+            添加到修改
+          </Button>
+        </>
+      )}
+
+      {!hasPreview && alreadyAdded && (
         <Alert
           type="success"
           showIcon
-          message={`${latestMod.old_value} → ${latestMod.new_value} ${device.unit}，${latestMod.changes.length} 个多边形变更`}
-          description="已在版图中高亮显示修改对比（红=修改前，绿=修改后）"
+          message="该器件已添加修改"
+          description="可重新预览并覆盖，或在修改汇总中查看"
           style={{ fontSize: 12 }}
         />
       )}

@@ -33,6 +33,7 @@ interface ProjectState {
   selectDevice: (device: Device | null) => void;
   fetchDevices: (projectId: string) => Promise<void>;
   modifyDevice: (deviceId: string, newValue: number, mode: string, manualParams?: Record<string, number>) => Promise<void>;
+  confirmModification: () => void;
   applyModifications: () => Promise<void>;
   fetchDiff: () => Promise<void>;
   downloadLayout: () => Promise<void>;
@@ -216,11 +217,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         mode,
         manual_params: manualParams,
       });
-      set((s) => ({ modifications: [...s.modifications, modification], modificationPreview: modification, loading: false }));
+      set({ modificationPreview: modification, loading: false });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ error: msg, loading: false });
     }
+  },
+
+  confirmModification: () => {
+    const { modificationPreview } = get();
+    if (!modificationPreview) return;
+    set((s) => ({
+      modifications: [
+        ...s.modifications.filter((m) => m.device_id !== modificationPreview.device_id),
+        modificationPreview,
+      ],
+      modificationPreview: null,
+    }));
   },
 
   applyModifications: async () => {

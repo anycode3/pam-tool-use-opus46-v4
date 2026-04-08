@@ -110,3 +110,47 @@ def aspect_ratio(points: list[list[float]]) -> float:
     if w == 0 or h == 0:
         return float("inf")
     return max(w, h) / min(w, h)
+
+
+def distance_to_centroid_range(points: list[list[float]]) -> tuple[float, float]:
+    """Compute the range of distances from all vertices to the centroid.
+
+    Returns (min_distance, max_distance). Used for spiral inductor
+    inner/outer radius detection.
+    """
+    centroid = polygon_centroid(points)
+    cx, cy = centroid
+    distances = [math.sqrt((p[0] - cx) ** 2 + (p[1] - cy) ** 2) for p in points]
+    return (min(distances), max(distances))
+
+
+def bbox_area_ratio(points: list[list[float]]) -> float:
+    """Compute the ratio of polygon area to its bounding box area.
+
+    Spiral shapes have lower ratios (due to hollow center),
+    rectangles have ratios close to 1.
+    """
+    bbox = polygon_bbox(points)
+    bbox_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+    if bbox_area == 0:
+        return 0.0
+    poly_area = polygon_area(points)
+    return poly_area / bbox_area
+
+
+def median_edge_length(points: list[list[float]]) -> float:
+    """Compute the median length of polygon edges.
+
+    Used for estimating line width in spiral inductors.
+    """
+    n = len(points)
+    if n < 2:
+        return 0.0
+    edge_lengths = []
+    for i in range(n):
+        j = (i + 1) % n
+        dx = points[j][0] - points[i][0]
+        dy = points[j][1] - points[i][1]
+        edge_lengths.append(math.sqrt(dx * dx + dy * dy))
+    sorted_lengths = sorted(edge_lengths)
+    return sorted_lengths[n // 2]

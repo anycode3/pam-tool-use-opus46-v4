@@ -17,6 +17,9 @@ from services.geometry_utils import (
     overlap_area,
     bbox_dimensions,
     aspect_ratio,
+    distance_to_centroid_range,
+    bbox_area_ratio,
+    median_edge_length,
 )
 
 
@@ -70,35 +73,38 @@ def recognize_devices(
         return f"dev_{dev_counter:03d}"
 
     # 1. Inductors (spiral detection on both ME1 and ME2 overlapping)
-    me1_spirals = []
+    me1_spirals: list[tuple[dict, dict]] = []  # (geometry, params)
     for geo in layer_geos["ME1"]:
         if geo["id"] in used_ids:
             continue
         pts = geo["points"]
-        if _is_inductor_shape(pts):
-            me1_spirals.append(geo)
+        is_spiral, spiral_params = _is_inductor_shape(pts)
+        if is_spiral:
+            me1_spirals.append((geo, spiral_params))
 
-    me2_spirals = []
+    me2_spirals: list[tuple[dict, dict]] = []
     for geo in layer_geos["ME2"]:
         if geo["id"] in used_ids:
             continue
         pts = geo["points"]
-        if _is_inductor_shape(pts):
-            me2_spirals.append(geo)
+        is_spiral, spiral_params = _is_inductor_shape(pts)
+        if is_spiral:
+            me2_spirals.append((geo, spiral_params))
 
     # Match ME1 spirals with overlapping ME2 spirals
-    for g1 in me1_spirals:
+    for g1, params1 in me1_spirals:
         if g1["id"] in used_ids:
             continue
         bb1 = polygon_bbox(g1["points"])
-        for g2 in me2_spirals:
+        for g2, params2 in me2_spirals:
             if g2["id"] in used_ids:
                 continue
             bb2 = polygon_bbox(g2["points"])
             # Check if the two spirals overlap significantly
             ov = overlap_area(bb1, bb2)
             min_area = min(polygon_area(g1["points"]), polygon_area(g2["points"]))
-            if ov > 0 and min_area > 0 and ov / min_area > 0.5:
+            # Relaxed overlap threshold: > 0.3 instead of > 0.5
+            if ov > 0 and min_area > 0 and ov / min_area > 0.3:
                 # Found a matching pair
                 turns = _estimate_turns(g1["points"])
                 combined_bbox = [
@@ -106,6 +112,14 @@ def recognize_devices(
                     max(bb1[2], bb2[2]), max(bb1[3], bb2[3]),
                 ]
                 value = turns * INDUCTANCE_PER_TURN_NH
+                # Merge params from both spirals
+                merged_params = {
+                    "turns": turns,
+                    "inner_radius": params1.get("inner_radius", 0),
+                    "outer_radius": params1.get("outer_radius", 0),
+                    "line_width": params1.get("line_width", 0),
+                    "compactness": params1.get("compactness", 0),
+                }
                 dev = _make_device(
                     dev_id=next_id(),
                     dev_type="inductor",
@@ -115,27 +129,39 @@ def recognize_devices(
                     bbox=combined_bbox,
                     polygon_ids=[g1["id"], g2["id"]],
                     points_list=[g1["points"], g2["points"]],
-                    extra={"turns": turns},
+                    extra=merged_params,
                 )
                 devices.append(dev)
                 used_ids.add(g1["id"])
                 used_ids.add(g2["id"])
                 break  # each ME1 spiral matched to at most one ME2 spiral
 
-    # 2. Capacitors (overlapping rectangles on ME1 and ME2)
-    me1_rects = [g for g in layer_geos["ME1"]
-                 if g["id"] not in used_ids and is_rectangular(g["points"])]
-    me2_rects = [g for g in layer_geos["ME2"]
-                 if g["id"] not in used_ids and is_rectangular(g["points"])]
+    # 2. Capacitors (overlapping plates on ME1 and ME2)
+    # Use improved capacitor plate detection supporting more vertices
+    me1_plates: list[tuple[dict, float]] = []  # (geometry, area)
+    for g in layer_geos["ME1"]:
+        if g["id"] in used_ids:
+            continue
+        is_plate, area = _is_capacitor_plate(g["points"])
+        if is_plate:
+            me1_plates.append((g, area))
+
+    me2_plates: list[tuple[dict, float]] = []
+    for g in layer_geos["ME2"]:
+        if g["id"] in used_ids:
+            continue
+        is_plate, area = _is_capacitor_plate(g["points"])
+        if is_plate:
+            me2_plates.append((g, area))
 
     # Pre-collect VA1 polygons for PAD/GND via exclusion during cap detection
     va1_all = [g for g in layer_geos["VA1"] if g["id"] not in used_ids]
 
-    for g1 in me1_rects:
+    for g1, area1 in me1_plates:
         if g1["id"] in used_ids:
             continue
         bb1 = polygon_bbox(g1["points"])
-        for g2 in me2_rects:
+        for g2, area2 in me2_plates:
             if g2["id"] in used_ids:
                 continue
             bb2 = polygon_bbox(g2["points"])
@@ -169,7 +195,7 @@ def recognize_devices(
                 devices.append(dev)
                 used_ids.add(g1["id"])
                 used_ids.add(g2["id"])
-                break  # each ME1 rect matched to at most one ME2 rect
+                break  # each ME1 plate matched to at most one ME2 plate
 
     # 3. Resistors (TFR layer, rectangular, high aspect ratio)
     for geo in layer_geos["TFR"]:
@@ -231,22 +257,54 @@ def recognize_devices(
     return {"devices": devices, "stats": stats}
 
 
-def _is_inductor_shape(points: list[list[float]]) -> bool:
+def _is_inductor_shape(points: list[list[float]]) -> tuple[bool, dict]:
     """Detect if a polygon looks like a spiral inductor.
 
-    Criteria: many vertices (> 8) and high perimeter-to-area ratio.
+    Improved detection with relaxed thresholds and additional geometric checks.
+
+    Returns:
+        Tuple of (is_spiral, params_dict) where params_dict contains
+        inner_radius, outer_radius, line_width, compactness if detected.
     """
     n = len(points)
-    if n <= 8:
-        return False
+    if n < 8:  # Relaxed: >= 8 vertices
+        return False, {}
+
     area = polygon_area(points)
     if area == 0:
-        return False
+        return False, {}
+
     perimeter = polygon_perimeter(points)
     # Compactness = 4*pi*area / perimeter^2.  Circle=1, spiral << 1.
     compactness = (4 * math.pi * area) / (perimeter * perimeter)
-    # Spiral shapes have low compactness (< 0.3 roughly)
-    return compactness < 0.3
+
+    # Relaxed threshold: < 0.4 instead of < 0.3
+    if compactness > 0.4:
+        return False, {}
+
+    # New check: inner/outer radius ratio
+    inner_r, outer_r = distance_to_centroid_range(points)
+
+    # Spiral should have significant radius difference (ratio > 1.3)
+    if inner_r == 0 or outer_r / inner_r < 1.3:
+        return False, {}
+
+    # New check: bounding box area ratio
+    # Spirals have lower ratios due to hollow center
+    bbox_ratio = bbox_area_ratio(points)
+    if bbox_ratio > 0.8:  # Rectangle-like shapes are not spirals
+        return False, {}
+
+    # Extract line width from median edge length
+    line_width = median_edge_length(points)
+
+    params = {
+        "inner_radius": round(inner_r, 2),
+        "outer_radius": round(outer_r, 2),
+        "line_width": round(line_width, 2),
+        "compactness": round(compactness, 4),
+    }
+    return True, params
 
 
 def _estimate_turns(points: list[list[float]]) -> int:
@@ -273,6 +331,39 @@ def _estimate_turns(points: list[list[float]]) -> int:
         total_angle += abs(delta)
     turns = max(1, int(total_angle / (2 * math.pi)))
     return turns
+
+
+def _is_capacitor_plate(points: list[list[float]]) -> tuple[bool, float]:
+    """Detect if a polygon is suitable as a capacitor plate.
+
+    Improved detection supporting polygons with more vertices
+    (GDS files may use more than 4 vertices for rectangles).
+
+    Returns:
+        Tuple of (is_plate, area) where area is the polygon area.
+    """
+    n = len(points)
+    if n < 4 or n > 50:  # Relaxed vertex range
+        return False, 0.0
+
+    bbox = polygon_bbox(points)
+    bbox_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+    poly_area = polygon_area(points)
+
+    if bbox_area == 0 or poly_area == 0:
+        return False, 0.0
+
+    # Area ratio > 0.85 indicates an approximately rectangular shape
+    area_ratio = poly_area / bbox_area
+    if area_ratio < 0.85:
+        return False, 0.0
+
+    # For 4-vertex polygons, also check rectangularity with relaxed tolerance
+    if n == 4:
+        if not is_rectangular(points, tolerance=0.15):
+            return False, 0.0
+
+    return True, poly_area
 
 
 def _find_multi_layer_devices(

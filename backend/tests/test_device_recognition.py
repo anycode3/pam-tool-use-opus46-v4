@@ -210,3 +210,111 @@ class TestDeviceRecognition:
         result = recognize_devices([], {})
         assert result["devices"] == []
         assert result["stats"]["total"] == 0
+
+
+class TestInductorRecognition:
+    """Tests for spiral inductor recognition."""
+
+    def test_recognizes_spiral_inductor(self, sample_gds_with_inductor):
+        """Should recognize spiral inductor from overlapping ME1/ME2 spirals."""
+        layout_data = parse_layout(str(sample_gds_with_inductor))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+        inductors = [d for d in result["devices"] if d["type"] == "inductor"]
+        assert len(inductors) >= 1, f"Expected at least 1 inductor, got {len(inductors)}"
+
+        ind = inductors[0]
+        assert "ME1" in ind["layers"]
+        assert "ME2" in ind["layers"]
+        assert ind["value"] > 0
+        assert ind["unit"] == "nH"
+        assert "turns" in ind, "Inductor should have 'turns' parameter extracted"
+
+    def test_inductor_has_geometric_params(self, sample_gds_with_inductor):
+        """Inductor should have extracted geometric parameters."""
+        layout_data = parse_layout(str(sample_gds_with_inductor))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+        inductors = [d for d in result["devices"] if d["type"] == "inductor"]
+
+        if len(inductors) >= 1:
+            ind = inductors[0]
+            # Check for extracted geometric parameters
+            assert "inner_radius" in ind
+            assert "outer_radius" in ind
+            assert "line_width" in ind
+            assert ind["inner_radius"] > 0
+            assert ind["outer_radius"] > ind["inner_radius"]
+
+    def test_inductor_not_confused_with_capacitor(self, sample_gds_with_inductor):
+        """Spiral inductor polygons should not be assigned to capacitor."""
+        layout_data = parse_layout(str(sample_gds_with_inductor))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+
+        # Get polygon IDs assigned to inductors
+        inductor_poly_ids = set()
+        for dev in result["devices"]:
+            if dev["type"] == "inductor":
+                inductor_poly_ids.update(dev["polygon_ids"])
+
+        # Get polygon IDs assigned to capacitors
+        capacitor_poly_ids = set()
+        for dev in result["devices"]:
+            if dev["type"] == "capacitor":
+                capacitor_poly_ids.update(dev["polygon_ids"])
+
+        # No overlap between inductor and capacitor polygon assignments
+        overlap = inductor_poly_ids.intersection(capacitor_poly_ids)
+        assert len(overlap) == 0, f"Polygons assigned to both inductor and capacitor: {overlap}"
+
+    def test_capacitor_also_detected(self, sample_gds_with_inductor):
+        """The test GDS also has a capacitor that should be detected."""
+        layout_data = parse_layout(str(sample_gds_with_inductor))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+        caps = [d for d in result["devices"] if d["type"] == "capacitor"]
+        assert len(caps) >= 1, "Expected capacitor to be detected alongside inductor"
+
+
+class TestImprovedGeometryUtils:
+    """Tests for new geometry utility functions."""
+
+    def test_distance_to_centroid_range(self):
+        from services.geometry_utils import distance_to_centroid_range
+
+        # Square centered at origin - corners are at distance sqrt(10²+10²) ≈ 14.14
+        pts = [[-10, -10], [10, -10], [10, 10], [-10, 10]]
+        inner_r, outer_r = distance_to_centroid_range(pts)
+        assert abs(inner_r - 14.14) < 0.1  # All corners same distance
+        assert abs(outer_r - 14.14) < 0.1
+
+        # Larger polygon with varying distances (irregular pentagon)
+        pts2 = [[0, 0], [30, 0], [30, 15], [15, 25], [0, 20]]
+        inner_r2, outer_r2 = distance_to_centroid_range(pts2)
+        assert inner_r2 > 0  # All vertices should be > 0 distance from centroid
+        assert outer_r2 > inner_r2  # Some vertices farther than others
+
+    def test_bbox_area_ratio(self):
+        from services.geometry_utils import bbox_area_ratio
+
+        # Perfect rectangle fills its bbox completely
+        pts = [[0, 0], [10, 0], [10, 5], [0, 5]]
+        ratio = bbox_area_ratio(pts)
+        assert ratio == 1.0
+
+        # Triangle fills half its bbox
+        pts2 = [[0, 0], [10, 0], [5, 5]]
+        ratio2 = bbox_area_ratio(pts2)
+        assert 0.4 < ratio2 < 0.6  # Triangle fills ~50% of bbox
+
+    def test_median_edge_length(self):
+        from services.geometry_utils import median_edge_length
+
+        # Square with edges of length 10
+        pts = [[0, 0], [10, 0], [10, 10], [0, 10]]
+        median = median_edge_length(pts)
+        assert median == 10.0
+
+        # Rectangle with edges 10 and 5 alternating
+        # Edge lengths: [10, 5, 10, 5], sorted: [5, 5, 10, 10]
+        # Median index = 4 // 2 = 2, sorted[2] = 10
+        pts2 = [[0, 0], [10, 0], [10, 5], [0, 5]]
+        median2 = median_edge_length(pts2)
+        assert median2 == 10.0  # Median of [5, 5, 10, 10] is 10

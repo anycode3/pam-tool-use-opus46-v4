@@ -318,3 +318,38 @@ class TestImprovedGeometryUtils:
         pts2 = [[0, 0], [10, 0], [10, 5], [0, 5]]
         median2 = median_edge_length(pts2)
         assert median2 == 10.0  # Median of [5, 5, 10, 10] is 10
+
+
+class TestSeparateSpiralInductor:
+    """Tests for multi-polygon spiral inductor recognition."""
+
+    def test_recognizes_separate_spiral_inductor(self, sample_gds_with_separate_spiral):
+        """Should recognize spiral inductor from separate rectangles."""
+        layout_data = parse_layout(str(sample_gds_with_separate_spiral))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+        inductors = [d for d in result["devices"] if d["type"] == "inductor"]
+        assert len(inductors) >= 1, f"Expected at least 1 inductor, got {len(inductors)}"
+
+        ind = inductors[0]
+        assert ind["value"] > 0
+        assert ind["unit"] == "nH"
+        assert len(ind["polygon_ids"]) >= 8  # Should have multiple polygons
+        assert ind.get("recognition_method") == "multi_polygon"
+
+    def test_separate_spiral_not_confused_with_capacitor(self, sample_gds_with_separate_spiral):
+        """Separate spiral rectangles should not be identified as capacitors."""
+        layout_data = parse_layout(str(sample_gds_with_separate_spiral))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+
+        # Count polygons assigned to inductors
+        inductor_poly_ids = set()
+        for dev in result["devices"]:
+            if dev["type"] == "inductor":
+                inductor_poly_ids.update(dev["polygon_ids"])
+
+        # Most ME1/ME2 geometries should be assigned to inductor, not capacitor
+        total_me1_me2 = sum(
+            1 for g in layout_data["geometries"]
+            if g["layer"] in [1, 2]
+        )
+        assert len(inductor_poly_ids) > total_me1_me2 * 0.5  # Majority should be inductor

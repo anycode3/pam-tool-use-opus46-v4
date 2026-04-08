@@ -245,3 +245,76 @@ def sample_gds_with_inductor(tmp_path):
     gds_path = tmp_path / "inductor.gds"
     lib.write_gds(str(gds_path))
     return gds_path
+
+
+@pytest.fixture
+def sample_gds_with_separate_spiral(tmp_path):
+    """GDS with spiral inductor represented as separate rectangles (multi-polygon)."""
+    lib = gdstk.Library()
+    cell = lib.new_cell("TOP")
+
+    # Generate a 3-turn square spiral using separate rectangles
+    center_x, center_y = 50, 50
+    width = 8  # Arm width
+    turns = 3
+
+    for turn in range(turns):
+        size = 90 - turn * 20  # Decreasing size for each turn
+        half = size / 2
+
+        # Four arms: top, right, bottom, left
+        # Top arm
+        cell.add(gdstk.rectangle(
+            (center_x - half, center_y + half - width),
+            (center_x + half, center_y + half),
+            layer=1, datatype=0
+        ))
+        cell.add(gdstk.rectangle(
+            (center_x - half, center_y + half - width),
+            (center_x + half, center_y + half),
+            layer=2, datatype=0
+        ))
+
+        # Right arm
+        cell.add(gdstk.rectangle(
+            (center_x + half - width, center_y - half),
+            (center_x + half, center_y + half),
+            layer=1, datatype=0
+        ))
+        cell.add(gdstk.rectangle(
+            (center_x + half - width, center_y - half),
+            (center_x + half, center_y + half),
+            layer=2, datatype=0
+        ))
+
+        # Bottom arm
+        cell.add(gdstk.rectangle(
+            (center_x - half, center_y - half),
+            (center_x + half, center_y - half + width),
+            layer=1, datatype=0
+        ))
+        cell.add(gdstk.rectangle(
+            (center_x - half, center_y - half),
+            (center_x + half, center_y - half + width),
+            layer=2, datatype=0
+        ))
+
+        # Left arm
+        cell.add(gdstk.rectangle(
+            (center_x - half, center_y - half),
+            (center_x - half + width, center_y + half),
+            layer=1, datatype=0
+        ))
+        cell.add(gdstk.rectangle(
+            (center_x - half, center_y - half),
+            (center_x - half + width, center_y + half),
+            layer=2, datatype=0
+        ))
+
+    # Add a separate capacitor (should not be confused with inductor)
+    cell.add(gdstk.rectangle((150, 0), (200, 50), layer=1, datatype=0))
+    cell.add(gdstk.rectangle((155, 5), (195, 45), layer=2, datatype=0))
+
+    gds_path = tmp_path / "separate_spiral.gds"
+    lib.write_gds(str(gds_path))
+    return gds_path

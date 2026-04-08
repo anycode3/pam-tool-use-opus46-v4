@@ -114,7 +114,7 @@ export default function DeviceModifyPanel({ device }: DeviceModifyPanelProps) {
             type="info"
             showIcon
             message={`${modificationPreview.old_value} → ${modificationPreview.new_value} ${device.unit}，${modificationPreview.changes.length} 个多边形变更`}
-            description="版图中已高亮显示对比（红=修改前，绿=修改后）"
+            description="版图中已高亮显示对比（绿=修改前，红=修改后）"
             style={{ fontSize: 12 }}
           />
           <Button

@@ -18,8 +18,8 @@ const LAYER_COLORS: [number, number, number, number][] = [
 const DEFAULT_COLOR: [number, number, number, number] = [128, 128, 128, 160];
 const HIGHLIGHT_COLOR: [number, number, number, number] = [255, 255, 0, 220];
 const DEVICE_HIGHLIGHT_COLOR: [number, number, number, number] = [0, 255, 255, 230];
-const MOD_OLD_COLOR: [number, number, number, number] = [255, 77, 79, 180];   // Red - before
-const MOD_NEW_COLOR: [number, number, number, number] = [82, 196, 26, 180];   // Green - after
+const MOD_OLD_COLOR: [number, number, number, number] = [82, 196, 26, 180];   // Green - before (original)
+const MOD_NEW_COLOR: [number, number, number, number] = [255, 77, 79, 180];   // Red - after (modified)
 
 export default function LayoutViewer() {
   const { layoutData, visibleLayers, selectedDevice, drcResults, highlightedViolationPolygonId, modificationPreview } = useProjectStore();

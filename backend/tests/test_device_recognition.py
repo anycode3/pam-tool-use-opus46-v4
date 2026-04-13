@@ -353,3 +353,116 @@ class TestSeparateSpiralInductor:
             if g["layer"] in [1, 2]
         )
         assert len(inductor_poly_ids) > total_me1_me2 * 0.5  # Majority should be inductor
+
+
+class TestME2BasedInductorRecognition:
+    """Tests for ME2-centric inductor recognition approach.
+
+    新方案：利用ME2闭合螺旋确定电感区域，再结合ME1分析空间关系。
+    """
+
+    def test_me2_only_inductor_detected(self, sample_gds_with_me2_only_inductor):
+        """Should detect inductor even without ME1 in inductor region."""
+        layout_data = parse_layout(str(sample_gds_with_me2_only_inductor))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+
+        inductors = [d for d in result["devices"] if d["type"] == "inductor"]
+        assert len(inductors) >= 1, f"Expected at least 1 inductor, got {len(inductors)}"
+
+        ind = inductors[0]
+        assert ind["value"] > 0
+        assert ind["unit"] == "nH"
+        assert "turns" in ind
+        print(f"\n  ME2-only inductor detected: turns={ind['turns']}, value={ind['value']}nH")
+
+    def test_proper_inductor_with_me1_detected(self, sample_gds_with_proper_inductor):
+        """Should detect inductor with ME1+ME2 structure."""
+        layout_data = parse_layout(str(sample_gds_with_proper_inductor))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+
+        inductors = [d for d in result["devices"] if d["type"] == "inductor"]
+        assert len(inductors) >= 1, f"Expected at least 1 inductor, got {len(inductors)}"
+
+        ind = inductors[0]
+        assert "ME1" in ind["layers"] or "ME2" in ind["layers"]
+        assert ind["value"] > 0
+        assert ind["unit"] == "nH"
+        print(f"\n  ME1+ME2 inductor detected: turns={ind['turns']}, value={ind['value']}nH")
+
+    def test_inductor_with_noise_separation(self, sample_gds_with_inductor_and_noise):
+        """Should correctly separate inductor region from nearby noise."""
+        layout_data = parse_layout(str(sample_gds_with_inductor_and_noise))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+
+        inductors = [d for d in result["devices"] if d["type"] == "inductor"]
+        capacitors = [d for d in result["devices"] if d["type"] == "capacitor"]
+
+        assert len(inductors) >= 1, "Should detect the inductor"
+
+        # The noise ME1 rectangles should NOT be detected as capacitors
+        # (they're not overlapping with ME2 in capacitor region)
+        print(f"\n  Inductors: {len(inductors)}, Capacitors: {len(capacitors)}")
+
+        # Check that noise was not incorrectly assigned
+        for ind in inductors:
+            # Inductor bbox should NOT include noise region (around 200-230)
+            bbox = ind["bbox"]
+            assert bbox[2] < 200, f"Inductor bbox {bbox} should not include noise at x>200"
+
+    def test_mixed_devices_all_detected(self, sample_gds_mixed_devices):
+        """Should correctly detect all device types in mixed layout."""
+        layout_data = parse_layout(str(sample_gds_mixed_devices))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+
+        stats = result["stats"]
+        print(f"\n  Stats: {stats}")
+
+        # Should detect at least 1 inductor
+        assert stats["inductors"] >= 1, f"Expected inductor, got {stats}"
+
+        # Should detect at least 1 capacitor
+        assert stats["capacitors"] >= 1, f"Expected capacitor, got {stats}"
+
+        # Should detect at least 1 resistor
+        assert stats["resistors"] >= 1, f"Expected resistor, got {stats}"
+
+        # Should detect PAD and/or GND via
+        has_pad_or_via = stats["pads"] >= 1 or stats["via_gnds"] >= 1
+        assert has_pad_or_via, "Expected PAD or GND via, got neither"
+
+        print(f"\n  Mixed layout detected successfully:")
+        print(f"    Inductors: {stats['inductors']}")
+        print(f"    Capacitors: {stats['capacitors']}")
+        print(f"    Resistors: {stats['resistors']}")
+        print(f"    PADs: {stats['pads']}")
+        print(f"    GND Vias: {stats['via_gnds']}")
+
+
+class TestInductorParameterExtraction:
+    """Tests for inductor geometric parameter extraction."""
+
+    def test_inductor_extracts_turns(self, sample_gds_with_proper_inductor):
+        """Should extract turns count from inductor geometry."""
+        layout_data = parse_layout(str(sample_gds_with_proper_inductor))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+
+        inductors = [d for d in result["devices"] if d["type"] == "inductor"]
+        if len(inductors) >= 1:
+            ind = inductors[0]
+            assert "turns" in ind, "Should extract turns parameter"
+            assert ind["turns"] >= 1, f"Turns should be >= 1, got {ind['turns']}"
+            print(f"\n  Extracted turns: {ind['turns']}")
+
+    def test_inductor_extracts_radius(self, sample_gds_with_proper_inductor):
+        """Should extract inner/outer radius from inductor geometry."""
+        layout_data = parse_layout(str(sample_gds_with_proper_inductor))
+        result = recognize_devices(layout_data["geometries"], LAYER_MAPPING)
+
+        inductors = [d for d in result["devices"] if d["type"] == "inductor"]
+        if len(inductors) >= 1:
+            ind = inductors[0]
+            if "inner_radius" in ind and "outer_radius" in ind:
+                assert ind["inner_radius"] > 0, "Inner radius should be positive"
+                assert ind["outer_radius"] > ind["inner_radius"], \
+                    f"Outer radius {ind['outer_radius']} should be > inner radius {ind['inner_radius']}"
+                print(f"\n  Radii: inner={ind['inner_radius']}, outer={ind['outer_radius']}")

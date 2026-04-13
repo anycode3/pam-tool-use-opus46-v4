@@ -318,3 +318,266 @@ def sample_gds_with_separate_spiral(tmp_path):
     gds_path = tmp_path / "separate_spiral.gds"
     lib.write_gds(str(gds_path))
     return gds_path
+
+
+def _generate_closed_spiral_polygon(
+    center: tuple[float, float] = (0.0, 0.0),
+    outer_size: float = 100.0,
+    inner_size: float = 20.0,
+    turns: int = 3,
+    line_width: float = 8.0,
+) -> list[tuple[float, float]]:
+    """Generate a closed square spiral polygon.
+
+    Creates a continuous spiral path from outer to inner, then closes.
+
+    Args:
+        center: (x, y) center of spiral
+        outer_size: Outer dimension (full size, not half)
+        inner_size: Inner dimension (full size, not half)
+        turns: Number of turns
+        line_width: Width of spiral line
+
+    Returns:
+        List of (x, y) vertices forming a closed spiral polygon.
+    """
+    cx, cy = center
+    half_outer = outer_size / 2
+    half_inner = inner_size / 2
+    step = line_width * 1.2  # Spacing between turns
+
+    points = []
+
+    # Generate spiral path starting from outer edge
+    # We'll create a continuous path that spirals inward
+
+    # Starting position (top-right outer corner)
+    x = cx + half_outer
+    y = cy + half_outer
+    points.append((x, y))
+
+    for turn in range(turns):
+        current_half = half_outer - turn * step
+
+        if current_half <= half_inner:
+            # Final segment to center
+            points.append((cx + half_inner, cy + half_inner))
+            break
+
+        # Top edge: right to left
+        points.append((cx - current_half, cy + current_half))
+
+        # Left edge: top to bottom
+        points.append((cx - current_half, cy - current_half))
+
+        # Bottom edge: left to right
+        points.append((cx + current_half, cy - current_half))
+
+        # Right edge: bottom to top (but stop short for next turn)
+        next_half = current_half - step
+        if next_half > half_inner:
+            points.append((cx + next_half, cy - current_half))
+
+    # Now spiral inward (reverse direction)
+    for turn in range(turns - 1, -1, -1):
+        current_half = half_outer - turn * step
+        next_half = current_half - step
+
+        if next_half <= half_inner:
+            # Close at center
+            points.append((cx, cy))
+            break
+
+        # Bottom edge: right to left (inner)
+        points.append((cx + next_half, cy - next_half))
+
+        # Left edge: bottom to top (inner)
+        points.append((cx - next_half, cy - next_half))
+
+        # Top edge: left to right (inner)
+        points.append((cx - next_half, cy + next_half))
+
+        # Right edge: top to bottom (connecting to next outer)
+        if turn > 0:
+            connect_half = current_half - step
+            points.append((cx + connect_half, cy + next_half))
+
+    return points
+
+
+@pytest.fixture
+def sample_gds_with_me2_only_inductor(tmp_path):
+    """GDS with ME2-only closed spiral inductor.
+
+    ME2层有完整的闭合螺旋，ME1在电感区域外或没有。
+    用于测试仅基于ME2检测电感的可行性。
+    """
+    lib = gdstk.Library()
+    cell = lib.new_cell("TOP")
+
+    # ME2 closed spiral (centered at 50, 50)
+    me2_spiral_points = _generate_closed_spiral_polygon(
+        center=(50.0, 50.0),
+        outer_size=80.0,
+        inner_size=15.0,
+        turns=3,
+        line_width=8.0,
+    )
+
+    me2_poly = gdstk.Polygon(me2_spiral_points, layer=2, datatype=0)
+    cell.add(me2_poly)
+
+    # Add a separate capacitor far from the inductor (should not be confused)
+    cell.add(gdstk.rectangle((150, 0), (200, 50), layer=1, datatype=0))  # ME1 cap
+    cell.add(gdstk.rectangle((155, 5), (195, 45), layer=2, datatype=0))  # ME2 cap
+
+    gds_path = tmp_path / "me2_only_inductor.gds"
+    lib.write_gds(str(gds_path))
+    return gds_path
+
+
+@pytest.fixture
+def sample_gds_with_proper_inductor(tmp_path):
+    """GDS with proper ME1+ME2 inductor structure.
+
+    ME2有闭合螺旋，ME1有对应的多边形（在电感区域内）。
+    用于测试ME1-ME2空间关系分析。
+    """
+    lib = gdstk.Library()
+    cell = lib.new_cell("TOP")
+
+    # ME2 closed spiral
+    me2_spiral_points = _generate_closed_spiral_polygon(
+        center=(50.0, 50.0),
+        outer_size=80.0,
+        inner_size=15.0,
+        turns=3,
+        line_width=8.0,
+    )
+    me2_poly = gdstk.Polygon(me2_spiral_points, layer=2, datatype=0)
+    cell.add(me2_poly)
+
+    # ME1: Add rectangles that correspond to spiral arms (inside inductor region)
+    # These represent the ME1 layer that connects to ME2 spiral
+    center_x, center_y = 50.0, 50.0
+
+    # Add 4 ME1 rectangles at different positions in the spiral region
+    me1_positions = [
+        (center_x - 30, center_y + 30, center_x + 30, center_y + 38),  # Top arm
+        (center_x + 30, center_y - 30, center_x + 38, center_y + 30),  # Right arm
+        (center_x - 30, center_y - 38, center_x + 30, center_y - 30),  # Bottom arm
+        (center_x - 38, center_y - 30, center_x - 30, center_y + 30),  # Left arm
+    ]
+
+    for x1, y1, x2, y2 in me1_positions:
+        cell.add(gdstk.rectangle((x1, y1), (x2, y2), layer=1, datatype=0))
+
+    # Add a separate capacitor far from the inductor
+    cell.add(gdstk.rectangle((150, 0), (200, 50), layer=1, datatype=0))  # ME1 cap
+    cell.add(gdstk.rectangle((155, 5), (195, 45), layer=2, datatype=0))  # ME2 cap
+
+    gds_path = tmp_path / "proper_inductor.gds"
+    lib.write_gds(str(gds_path))
+    return gds_path
+
+
+@pytest.fixture
+def sample_gds_with_inductor_and_noise(tmp_path):
+    """GDS with inductor plus nearby independent ME1 rectangles (noise).
+
+    电感附近有独立的ME1多边形（不是电感的一部分）。
+    用于测试能否正确区分。
+    """
+    lib = gdstk.Library()
+    cell = lib.new_cell("TOP")
+
+    # ME2 closed spiral inductor
+    me2_spiral_points = _generate_closed_spiral_polygon(
+        center=(50.0, 50.0),
+        outer_size=80.0,
+        inner_size=15.0,
+        turns=3,
+        line_width=8.0,
+    )
+    me2_poly = gdstk.Polygon(me2_spiral_points, layer=2, datatype=0)
+    cell.add(me2_poly)
+
+    # ME1: Add rectangles that ARE part of the inductor structure
+    center_x, center_y = 50.0, 50.0
+    me1_positions = [
+        (center_x - 30, center_y + 30, center_x + 30, center_y + 38),
+        (center_x + 30, center_y - 30, center_x + 38, center_y + 30),
+        (center_x - 30, center_y - 38, center_x + 30, center_y - 30),
+        (center_x - 38, center_y - 30, center_x - 30, center_y + 30),
+    ]
+    for x1, y1, x2, y2 in me1_positions:
+        cell.add(gdstk.rectangle((x1, y1), (x2, y2), layer=1, datatype=0))
+
+    # NOISE: Add independent ME1 rectangles far from inductor (not part of inductor)
+    # These should NOT be confused as being part of the inductor
+    noise_positions = [
+        (200, 200, 230, 215),  # Far away in upper right
+        (10, 200, 40, 215),    # Far away in upper left
+        (200, 10, 230, 25),    # Far away in lower right
+    ]
+    for x1, y1, x2, y2 in noise_positions:
+        cell.add(gdstk.rectangle((x1, y1), (x2, y2), layer=1, datatype=0))
+
+    # Add a separate capacitor
+    cell.add(gdstk.rectangle((150, 0), (200, 50), layer=1, datatype=0))
+    cell.add(gdstk.rectangle((155, 5), (195, 45), layer=2, datatype=0))
+
+    gds_path = tmp_path / "inductor_with_noise.gds"
+    lib.write_gds(str(gds_path))
+    return gds_path
+
+
+@pytest.fixture
+def sample_gds_mixed_devices(tmp_path):
+    """GDS with inductor, capacitor, resistor, PAD, and GND via.
+
+    混合版图，测试所有器件类型能被正确区分。
+    """
+    lib = gdstk.Library()
+    cell = lib.new_cell("TOP")
+
+    # === INDUCTOR (left side) ===
+    me2_spiral_points = _generate_closed_spiral_polygon(
+        center=(40.0, 40.0),
+        outer_size=60.0,
+        inner_size=12.0,
+        turns=2,
+        line_width=6.0,
+    )
+    cell.add(gdstk.Polygon(me2_spiral_points, layer=2, datatype=0))
+
+    # ME1 for inductor
+    for x1, y1, x2, y2 in [
+        (20, 55, 60, 62),  # Top
+        (52, 20, 60, 60),  # Right
+        (20, 18, 60, 25),   # Bottom
+        (18, 20, 25, 60),   # Left
+    ]:
+        cell.add(gdstk.rectangle((x1, y1), (x2, y2), layer=1, datatype=0))
+
+    # === CAPACITOR (center) ===
+    cell.add(gdstk.rectangle((100, 30), (150, 70), layer=1, datatype=0))  # ME1
+    cell.add(gdstk.rectangle((105, 35), (145, 65), layer=2, datatype=0))  # ME2
+
+    # === RESISTOR (right side) ===
+    cell.add(gdstk.rectangle((200, 40), (260, 48), layer=3, datatype=0))  # TFR
+
+    # === PAD (upper right) ===
+    cell.add(gdstk.rectangle((180, 150), (200, 170), layer=1, datatype=0))  # ME1
+    cell.add(gdstk.rectangle((180, 150), (200, 170), layer=2, datatype=0))  # ME2
+    cell.add(gdstk.rectangle((185, 155), (195, 165), layer=4, datatype=0))  # VA1
+
+    # === GND VIA (upper right, different location) ===
+    cell.add(gdstk.rectangle((220, 150), (230, 160), layer=5, datatype=0))  # GND
+    cell.add(gdstk.rectangle((220, 150), (230, 160), layer=1, datatype=0))  # ME1
+    cell.add(gdstk.rectangle((220, 150), (230, 160), layer=2, datatype=0))  # ME2
+    cell.add(gdstk.rectangle((222, 152), (228, 158), layer=4, datatype=0))  # VA1
+
+    gds_path = tmp_path / "mixed_devices.gds"
+    lib.write_gds(str(gds_path))
+    return gds_path

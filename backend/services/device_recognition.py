@@ -13,6 +13,7 @@ from services.geometry_utils import (
     polygon_perimeter,
     polygon_centroid,
     polygons_overlap,
+    bboxes_overlap,
     is_rectangular,
     overlap_area,
     bbox_dimensions,
@@ -72,7 +73,56 @@ def recognize_devices(
         dev_counter += 1
         return f"dev_{dev_counter:03d}"
 
-    # 1. Inductors - Step 1: Single polygon spiral detection
+    # 1. Inductors - Step 0: ME2-based detection (NEW APPROACH)
+    # Detect inductors using ME2 spiral as anchor, without requiring ME1 spiral
+    me2_candidates = _find_me2_spiral_candidates(layer_geos["ME2"], used_ids)
+
+    for me2_geo, me2_params in me2_candidates:
+        if me2_geo["id"] in used_ids:
+            continue
+
+        # Expand ME2 bbox to define inductor region (margin based on spiral size)
+        me2_bbox = polygon_bbox(me2_geo["points"])
+        margin = max(me2_bbox[2] - me2_bbox[0], me2_bbox[3] - me2_bbox[1]) * 0.3
+        region_bbox = _expand_bbox(me2_bbox, margin)
+
+        # Find ME1 polygons in this region
+        me1_in_region = _find_me1_in_region(layer_geos["ME1"], region_bbox, used_ids)
+
+        # Analyze and confirm inductor
+        inductor_info = _analyze_me2_based_inductor(
+            me2_geo, me2_params, me1_in_region,
+            layer_geos["ME2"], used_ids
+        )
+
+        if inductor_info:
+            # Determine which layers to report
+            layers = ["ME2"]
+            if me1_in_region:
+                layers = ["ME1", "ME2"]
+
+            dev = _make_device(
+                dev_id=next_id(),
+                dev_type="inductor",
+                value=round(inductor_info["inductance_nh"], 3),
+                unit="nH",
+                layers=layers,
+                bbox=inductor_info["bbox"],
+                polygon_ids=inductor_info["polygon_ids"],
+                points_list=[me2_geo["points"]] + [g["points"] for g in me1_in_region],
+                extra={
+                    "turns": inductor_info["turns"],
+                    "inner_radius": inductor_info["inner_radius"],
+                    "outer_radius": inductor_info["outer_radius"],
+                    "line_width": inductor_info["line_width"],
+                    "recognition_method": inductor_info["recognition_method"],
+                },
+            )
+            devices.append(dev)
+            for pid in inductor_info["polygon_ids"]:
+                used_ids.add(pid)
+
+    # 1. Inductors - Step 1: Single polygon spiral detection (ME1+ME2 overlapping)
     me1_spirals: list[tuple[dict, dict]] = []  # (geometry, params)
     for geo in layer_geos["ME1"]:
         if geo["id"] in used_ids:
@@ -354,6 +404,268 @@ def _estimate_turns(points: list[list[float]]) -> int:
         total_angle += abs(delta)
     turns = max(1, int(total_angle / (2 * math.pi)))
     return turns
+
+
+def _expand_bbox(bbox: list[float], margin: float) -> list[float]:
+    """Expand a bounding box by a margin.
+
+    Args:
+        bbox: [x_min, y_min, x_max, y_max]
+        margin: Amount to expand in each direction
+
+    Returns:
+        Expanded bbox [x_min - margin, y_min - margin, x_max + margin, y_max + margin]
+    """
+    return [
+        bbox[0] - margin,
+        bbox[1] - margin,
+        bbox[2] + margin,
+        bbox[3] + margin,
+    ]
+
+
+def _bbox_contains(bbox: list[float], point: list[float]) -> bool:
+    """Check if a point is inside a bounding box."""
+    x, y = point[0], point[1]
+    return bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3]
+
+
+def _find_me2_spiral_candidates(
+    me2_geos: list[dict],
+    used_ids: set[str],
+) -> list[tuple[dict, dict]]:
+    """Find ME2 polygons that look like spiral inductors.
+
+    Uses relaxed detection criteria: only requires ME2 to be spiral-shaped.
+    Does NOT require ME1 to be present.
+
+    Returns:
+        List of (geometry, params) tuples for ME2 spirals.
+    """
+    candidates = []
+    for geo in me2_geos:
+        if geo["id"] in used_ids:
+            continue
+        pts = geo["points"]
+        is_spiral, params = _is_inductor_shape(pts)
+        if is_spiral:
+            candidates.append((geo, params))
+    return candidates
+
+
+def _find_me1_in_region(
+    me1_geos: list[dict],
+    region_bbox: list[float],
+    used_ids: set[str],
+) -> list[dict]:
+    """Find ME1 polygons inside a given region bbox.
+
+    Args:
+        me1_geos: List of ME1 geometries
+        region_bbox: Region bounding box to search within
+        used_ids: Set of already-used polygon IDs
+
+    Returns:
+        List of ME1 geometries within the region.
+    """
+    found = []
+    for geo in me1_geos:
+        if geo["id"] in used_ids:
+            continue
+        # Check if geometry's bbox overlaps with region
+        geo_bbox = polygon_bbox(geo["points"])
+        if bboxes_overlap(geo_bbox, region_bbox):
+            found.append(geo)
+    return found
+
+
+def _analyze_me2_based_inductor(
+    me2_geo: dict,
+    me2_params: dict,
+    me1_in_region: list[dict],
+    all_me2_geos: list[dict],
+    used_ids: set[str],
+) -> dict | None:
+    """Analyze ME2 spiral and ME1 geometries to confirm inductor.
+
+    Uses Wheeler formula for accurate inductance calculation:
+    L = (N² × r²) / (8r + 11w)
+    where N = turns, r = mean radius, w = line width
+
+    Args:
+        me2_geo: ME2 spiral geometry
+        me2_params: Spiral parameters from _is_inductor_shape
+        me1_in_region: ME1 geometries found in inductor region
+        all_me2_geos: All ME2 geometries (for multi-polygon spiral detection)
+        used_ids: Set of already-used polygon IDs
+
+    Returns:
+        Inductor info dict if confirmed, None otherwise.
+    """
+    me2_bbox = polygon_bbox(me2_geo["points"])
+    me2_center = [
+        (me2_bbox[0] + me2_bbox[2]) / 2,
+        (me2_bbox[1] + me2_bbox[3]) / 2,
+    ]
+
+    # Count turns from ME2 spiral
+    turns = _estimate_turns(me2_geo["points"])
+
+    # Try to find additional ME2 polygons that form multi-polygon spiral
+    me2_pairs = _find_multilayer_spiral_pairs(
+        [me2_geo], all_me2_geos, used_ids
+    )
+
+    # If we have multi-polygon ME2 structure, use it
+    if me2_pairs:
+        all_me2_ids = [me2_geo["id"]]
+        all_points = [me2_geo["points"]]
+        for g1, g2 in me2_pairs:
+            if g1["id"] not in all_me2_ids:
+                all_me2_ids.append(g1["id"])
+                all_points.append(g1["points"])
+            if g2["id"] not in all_me2_ids:
+                all_me2_ids.append(g2["id"])
+                all_points.append(g2["points"])
+
+        # Recalculate turns from multiple polygons
+        total_angle = 0.0
+        for pts in all_points:
+            c = polygon_centroid(pts)
+            n = len(pts)
+            for i in range(n):
+                x1, y1 = pts[i][0] - c[0], pts[i][1] - c[1]
+                x2, y2 = pts[(i + 1) % n][0] - c[0], pts[(i + 1) % n][1] - c[1]
+                angle1 = math.atan2(y1, x1)
+                angle2 = math.atan2(y2, x2)
+                delta = angle2 - angle1
+                while delta > math.pi:
+                    delta -= 2 * math.pi
+                while delta < -math.pi:
+                    delta += 2 * math.pi
+                total_angle += abs(delta)
+        turns = max(1, int(total_angle / (2 * math.pi)))
+
+        combined_bbox = [
+            min(polygon_bbox(p)[0] for p in all_points),
+            min(polygon_bbox(p)[1] for p in all_points),
+            max(polygon_bbox(p)[2] for p in all_points),
+            max(polygon_bbox(p)[3] for p in all_points),
+        ]
+        inner_radius = me2_params.get("inner_radius", 10)
+        outer_radius = me2_params.get("outer_radius", 50)
+        line_width = me2_params.get("line_width", 5)
+
+        # Build polygon_ids list: ME2 + ME1 in region
+        me1_ids = [g["id"] for g in me1_in_region]
+        all_ids = all_me2_ids + me1_ids
+
+        # Wheeler formula: L = (N² × r²) / (8r + 11w)
+        # where r is mean radius (average of inner and outer)
+        mean_radius = (inner_radius + outer_radius) / 2
+        if mean_radius > 0 and line_width > 0:
+            inductance_nh = (turns ** 2 * mean_radius ** 2) / (8 * mean_radius + 11 * line_width)
+        else:
+            inductance_nh = turns * INDUCTANCE_PER_TURN_NH
+
+        return {
+            "bbox": combined_bbox,
+            "polygon_ids": all_ids,
+            "turns": turns,
+            "inner_radius": inner_radius,
+            "outer_radius": outer_radius,
+            "line_width": line_width,
+            "me1_in_region": me1_in_region,
+            "inductance_nh": inductance_nh,
+            "recognition_method": "me2_based",
+        }
+
+    # Single ME2 polygon case
+    inner_radius = me2_params.get("inner_radius", 10)
+    outer_radius = me2_params.get("outer_radius", 50)
+    line_width = me2_params.get("line_width", 5)
+
+    # Wheeler formula for single polygon
+    mean_radius = (inner_radius + outer_radius) / 2
+    if mean_radius > 0 and line_width > 0:
+        inductance_nh = (turns ** 2 * mean_radius ** 2) / (8 * mean_radius + 11 * line_width)
+    else:
+        inductance_nh = turns * INDUCTANCE_PER_TURN_NH
+
+    me1_ids = [g["id"] for g in me1_in_region]
+    all_ids = [me2_geo["id"]] + me1_ids
+
+    return {
+        "bbox": me2_bbox,
+        "polygon_ids": all_ids,
+        "turns": turns,
+        "inner_radius": inner_radius,
+        "outer_radius": outer_radius,
+        "line_width": line_width,
+        "me1_in_region": me1_in_region,
+        "inductance_nh": inductance_nh,
+        "recognition_method": "me2_based",
+    }
+
+
+def _find_multilayer_spiral_pairs(
+    anchor_geos: list[dict],
+    all_geos: list[dict],
+    used_ids: set[str],
+) -> list[tuple[dict, dict]]:
+    """Find additional geometries that form multi-polygon spiral structure.
+
+    For ME2-based detection, finds overlapping ME2 polygons that are
+    part of the same spiral inductor structure.
+
+    Returns:
+        List of (geo1, geo2) pairs forming the spiral.
+    """
+    if len(anchor_geos) == 0:
+        return []
+
+    pairs = []
+    anchor_centers = []
+    for geo in anchor_geos:
+        bb = polygon_bbox(geo["points"])
+        anchor_centers.append(((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2))
+
+    for geo in all_geos:
+        if geo["id"] in used_ids:
+            continue
+        if geo in anchor_geos:
+            continue
+
+        is_rect, _ = _is_capacitor_plate(geo["points"])
+        if not is_rect:
+            continue
+
+        bb = polygon_bbox(geo["points"])
+        geo_center = ((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2)
+
+        # Check if this geometry is close to any anchor (same inductor region)
+        for ax, ay in anchor_centers:
+            dist = math.sqrt((geo_center[0] - ax) ** 2 + (geo_center[1] - ay) ** 2)
+            if dist < 80:  # Same inductor region
+                # Find best matching partner in anchor_geos
+                best_match = None
+                best_score = 0
+                for anchor in anchor_geos:
+                    anchor_bb = polygon_bbox(anchor["points"])
+                    ov = overlap_area(anchor_bb, bb)
+                    if ov > 0:
+                        area1 = (anchor_bb[2] - anchor_bb[0]) * (anchor_bb[3] - anchor_bb[1])
+                        area2 = (bb[2] - bb[0]) * (bb[3] - bb[1])
+                        size_ratio = min(area1, area2) / max(area1, area2) if max(area1, area2) > 0 else 0
+                        score = ov * (1 + size_ratio)
+                        if score > best_score:
+                            best_score = score
+                            best_match = anchor
+
+                if best_match:
+                    pairs.append((geo, best_match))
+
+    return pairs
 
 
 def _is_capacitor_plate(points: list[list[float]]) -> tuple[bool, float]:

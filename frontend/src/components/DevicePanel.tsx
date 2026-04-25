@@ -27,6 +27,8 @@ import { useProjectStore } from "../store/useProjectStore";
 import type { Device } from "../types";
 import DeviceModifyPanel from "./DeviceModifyPanel";
 import DiffViewer from "./DiffViewer";
+import NetlistUploadDialog from "./NetlistUploadDialog";
+import DeviceMatchPanel from "./DeviceMatchPanel";
 
 const { Text } = Typography;
 
@@ -187,6 +189,8 @@ export default function DevicePanel() {
   const [applying, setApplying] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [popoverDeviceId, setPopoverDeviceId] = useState<string | null>(null);
+  const [netlistDialogOpen, setNetlistDialogOpen] = useState(false);
+  const [matchPanelOpen, setMatchPanelOpen] = useState(false);
 
   // Reset applied state when modifications change
   useEffect(() => {
@@ -296,15 +300,22 @@ export default function DevicePanel() {
       )}
 
       {currentProject && (
-        <Button
-          type="primary"
-          loading={recognizing || loading}
-          onClick={handleRecognize}
-          disabled={!hasMappings}
-          style={{ marginBottom: 12 }}
-        >
-          识别器件
-        </Button>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <Button
+            type="primary"
+            loading={recognizing || loading}
+            onClick={handleRecognize}
+            disabled={!hasMappings}
+          >
+            识别器件
+          </Button>
+          <Button onClick={() => setNetlistDialogOpen(true)}>
+            上传网表
+          </Button>
+          <Button onClick={() => setMatchPanelOpen(true)} disabled={devices.length === 0}>
+            网表匹配
+          </Button>
+        </div>
       )}
 
       {devices.length === 0 && currentProject ? (
@@ -404,6 +415,18 @@ export default function DevicePanel() {
           <DiffViewer />
         </div>
       )}
+
+      <NetlistUploadDialog
+        open={netlistDialogOpen}
+        onClose={() => setNetlistDialogOpen(false)}
+        projectId={currentProject?.id || ''}
+      />
+
+      <DeviceMatchPanel
+        open={matchPanelOpen}
+        onClose={() => setMatchPanelOpen(false)}
+        projectId={currentProject?.id || ''}
+      />
     </div>
   );
 }

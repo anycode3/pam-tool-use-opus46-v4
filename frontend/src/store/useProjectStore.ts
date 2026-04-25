@@ -44,6 +44,7 @@ interface ProjectState {
   runDrc: () => Promise<void>;
   fetchDrcResults: () => Promise<void>;
   setHighlightedViolationPolygonId: (id: string | null) => void;
+  uploadNetlist: (projectId: string, file: File) => Promise<{ devices: import("../types").SpiceDevice[] }>;
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -337,5 +338,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setHighlightedViolationPolygonId: (id: string | null) => {
     set({ highlightedViolationPolygonId: id });
+  },
+
+  uploadNetlist: async (projectId: string, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const resp = await fetch(`/api/projects/${projectId}/netlist/upload`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!resp.ok) throw new Error("Upload failed");
+    return resp.json();
   },
 }));

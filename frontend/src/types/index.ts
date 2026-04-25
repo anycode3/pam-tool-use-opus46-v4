@@ -104,3 +104,33 @@ export interface DrcResults {
   summary: { total: number; errors: number; warnings: number };
   passed: boolean;
 }
+
+export interface SpiceDevice {
+  instance_name: string;
+  device_type: 'inductor' | 'capacitor' | 'resistor';
+  value: number;
+  unit: string;
+  nets: string[];
+  subcircuit: string;
+}
+
+export interface SpiceNetlist {
+  devices: SpiceDevice[];
+  subcircuits: Record<string, SpiceDevice[]>;
+  global_nets: string[];
+}
+
+export interface MatchResult {
+  spice_name: string;
+  layout_id: string;
+  spice_value: number;
+  layout_value: number;
+  confidence: number;
+  match_method: string;
+}
+
+export interface MatchResponse {
+  matches: MatchResult[];
+  unmatched_spice: string[];
+  unmatched_layout: string[];
+}

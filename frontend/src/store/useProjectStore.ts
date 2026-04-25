@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ProjectInfo, LayoutData, Device, Modification, DiffChange, DrcRule, DrcResults } from "../types";
+import type { ProjectInfo, LayoutData, Device, Modification, DiffChange, DrcRule, DrcResults, MatchResponse } from "../types";
 import * as projectsApi from "../api/projects";
 
 interface ProjectState {
@@ -45,6 +45,7 @@ interface ProjectState {
   fetchDrcResults: () => Promise<void>;
   setHighlightedViolationPolygonId: (id: string | null) => void;
   uploadNetlist: (projectId: string, file: File) => Promise<{ devices: import("../types").SpiceDevice[] }>;
+  matchDevices: (projectId: string) => Promise<MatchResponse>;
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -349,5 +350,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     });
     if (!resp.ok) throw new Error("Upload failed");
     return resp.json();
+  },
+
+  matchDevices: async (projectId: string) => {
+    set({ loading: true, error: null });
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/devices/match`, { method: "POST" });
+      if (!resp.ok) throw new Error("Match failed");
+      const data: MatchResponse = await resp.json();
+      set({ loading: false });
+      return data;
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      set({ error: msg, loading: false });
+      throw e;
+    }
   },
 }));

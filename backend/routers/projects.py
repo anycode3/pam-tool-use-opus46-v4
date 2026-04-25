@@ -12,6 +12,7 @@ from services.device_modifier import modify_device, apply_modifications
 from services.layout_diff import compute_diff
 from services.layout_writer import write_layout
 from services.drc_engine import run_drc, parse_rules, parse_rule_file, validate_rule
+from services.spice_parser import parse_spice
 import config
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -464,3 +465,101 @@ def get_drc_results(project_id: str):
     if not data:
         raise HTTPException(404, "No DRC results found. Run DRC first.")
     return data
+
+
+# ---- Netlist endpoints ----
+
+NETLIST_EXTENSIONS = {".sp", ".cir", ".net"}
+
+
+@router.post("/{project_id}/netlist/upload")
+async def upload_netlist(project_id: str, file: UploadFile = File(...)):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in NETLIST_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported netlist type: {suffix}")
+
+    content = await file.read()
+    text = content.decode("utf-8")
+
+    parsed = parse_spice(text)
+
+    # Save raw netlist
+    storage.save_netlist(project_id, "netlist.sp", text)
+    # Save parsed data
+    storage.save_json(project_id, "netlist_data.json", {
+        "devices": [
+            {
+                "instance_name": d.instance_name,
+                "device_type": d.device_type,
+                "value": d.value,
+                "unit": d.unit,
+                "nets": d.nets,
+                "raw_value": d.raw_value,
+            }
+            for d in parsed.devices
+        ],
+        "subcircuits": {
+            name: [
+                {
+                    "instance_name": d.instance_name,
+                    "device_type": d.device_type,
+                    "value": d.value,
+                    "unit": d.unit,
+                    "nets": d.nets,
+                    "raw_value": d.raw_value,
+                }
+                for d in devs
+            ]
+            for name, devs in parsed.subcircuits.items()
+        },
+    })
+
+    return {
+        "status": "uploaded",
+        "device_count": len(parsed.devices),
+    }
+
+
+@router.get("/{project_id}/netlist")
+def get_netlist(project_id: str):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    text = storage.load_netlist(project_id, "netlist.sp")
+    if text is None:
+        raise HTTPException(404, "No netlist found. Upload a netlist first.")
+
+    parsed = parse_spice(text)
+    return {
+        "raw": text,
+        "devices": [
+            {
+                "instance_name": d.instance_name,
+                "device_type": d.device_type,
+                "value": d.value,
+                "unit": d.unit,
+                "nets": d.nets,
+                "raw_value": d.raw_value,
+            }
+            for d in parsed.devices
+        ],
+        "subcircuits": {
+            name: [
+                {
+                    "instance_name": d.instance_name,
+                    "device_type": d.device_type,
+                    "value": d.value,
+                    "unit": d.unit,
+                    "nets": d.nets,
+                    "raw_value": d.raw_value,
+                }
+                for d in devs
+            ]
+            for name, devs in parsed.subcircuits.items()
+        },
+    }

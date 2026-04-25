@@ -68,3 +68,13 @@ class StorageService:
         if not f.exists():
             return None
         return json.loads(f.read_text())
+
+    def save_netlist(self, project_id: str, filename: str, content: str) -> None:
+        project_dir = self._root() / project_id
+        (project_dir / filename).write_text(content)
+
+    def load_netlist(self, project_id: str, filename: str) -> str | None:
+        f = self._root() / project_id / filename
+        if not f.exists():
+            return None
+        return f.read_text()

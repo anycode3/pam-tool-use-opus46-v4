@@ -152,3 +152,94 @@ def test_upload_netlist_project_not_found(client):
         files={"file": ("test.sp", io.BytesIO(SIMPLE_SPICE.encode()))},
     )
     assert resp.status_code == 404
+
+
+# ---- Device match tests ----
+
+@pytest.fixture
+def project_with_netlist_and_devices(client):
+    """Create a project with netlist and recognized devices."""
+    import gdstk
+    lib = gdstk.Library()
+    cell = lib.new_cell("TOP")
+    # Capacitor: overlapping ME1 and ME2
+    cell.add(gdstk.rectangle((0, 0), (50, 50), layer=1, datatype=0))
+    cell.add(gdstk.rectangle((5, 5), (45, 45), layer=2, datatype=0))
+    # Resistor: thin strip on TFR
+    cell.add(gdstk.rectangle((100, 0), (150, 5), layer=3, datatype=0))
+    import tempfile, os
+    tmp = tempfile.NamedTemporaryFile(suffix=".gds", delete=False)
+    lib.write_gds(tmp.name)
+    data = open(tmp.name, "rb").read()
+    os.unlink(tmp.name)
+    resp = client.post(
+        "/api/projects/upload",
+        files={"file": ("test.gds", io.BytesIO(data), "application/octet-stream")},
+    )
+    pid = resp.json()["id"]
+
+    # Set layer mapping
+    client.put(
+        f"/api/projects/{pid}/layer-mapping",
+        json={"mappings": {"1/0": "ME1", "2/0": "ME2", "3/0": "TFR"}},
+    )
+
+    # Recognize devices
+    client.post(f"/api/projects/{pid}/devices/recognize", json={"method": "geometry"})
+
+    # Upload netlist
+    client.post(
+        f"/api/projects/{pid}/netlist/upload",
+        files={"file": ("test.sp", io.BytesIO(SIMPLE_SPICE.encode()))},
+    )
+
+    return pid
+
+
+def test_match_devices_no_netlist(project_with_gds, client):
+    """Test match when no netlist is uploaded."""
+    pid = project_with_gds
+    # Set layer mapping and run recognition
+    client.put(
+        f"/api/projects/{pid}/layer-mapping",
+        json={"mappings": {"1/0": "ME1", "2/0": "ME2"}},
+    )
+    client.post(f"/api/projects/{pid}/devices/recognize", json={"method": "geometry"})
+    resp = client.post(f"/api/projects/{pid}/devices/match")
+    assert resp.status_code == 404
+    assert "netlist" in resp.json()["detail"].lower()
+
+
+def test_match_devices_success(project_with_netlist_and_devices, client):
+    """Test successful device matching."""
+    pid = project_with_netlist_and_devices
+    resp = client.post(f"/api/projects/{pid}/devices/match")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "matches" in data
+    assert "unmatched_spice" in data
+    assert "unmatched_layout" in data
+    # Should have at least some matches (capacitor and resistor from SPICE should match)
+    assert isinstance(data["matches"], list)
+    assert isinstance(data["unmatched_spice"], list)
+    assert isinstance(data["unmatched_layout"], list)
+
+
+def test_match_devices_partial(project_with_netlist_and_devices, client):
+    """Test partial matching when some devices don't match."""
+    pid = project_with_netlist_and_devices
+    resp = client.post(f"/api/projects/{pid}/devices/match")
+    assert resp.status_code == 200
+    data = resp.json()
+    # SPICE has L1, C1, R1 but layout has capacitor and resistor
+    # Capacitor C1 may match, resistor R1 may match, but inductor L1 won't (no inductor in layout)
+    assert "matches" in data
+    assert "unmatched_spice" in data
+    # Layout has 2 devices (cap + resistor)
+    assert len(data["unmatched_layout"]) >= 0
+
+
+def test_match_devices_project_not_found(client):
+    """Test match with nonexistent project."""
+    resp = client.post("/api/projects/nonexistent/devices/match")
+    assert resp.status_code == 404

@@ -13,6 +13,8 @@ from services.layout_diff import compute_diff
 from services.layout_writer import write_layout
 from services.drc_engine import run_drc, parse_rules, parse_rule_file, validate_rule
 from services.spice_parser import parse_spice
+from services.netlist_matcher import match_devices
+from services.spice_models import SpiceDevice
 import config
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -220,6 +222,66 @@ def get_device(project_id: str, device_id: str):
             return dev
 
     raise HTTPException(404, f"Device {device_id} not found")
+
+
+@router.post("/{project_id}/devices/match")
+def match_project_devices(project_id: str):
+    info = storage.get_project(project_id)
+    if not info:
+        raise HTTPException(404, "Project not found")
+
+    # Load netlist data
+    netlist_data = storage.load_json(project_id, "netlist_data.json")
+    if not netlist_data or not netlist_data.get("devices"):
+        raise HTTPException(404, "No netlist found. Upload a netlist first.")
+
+    # Load layout devices
+    devices_data = storage.load_json(project_id, "devices.json")
+    if not devices_data or not devices_data.get("devices"):
+        raise HTTPException(404, "No layout devices found. Run recognition first.")
+
+    # Convert netlist dicts to SpiceDevice objects
+    spice_devices = [
+        SpiceDevice(
+            device_type=d["device_type"],
+            instance_name=d["instance_name"],
+            nodes=d.get("nets", []),
+            parameters={"value": d.get("raw_value", d.get("value", ""))},
+        )
+        for d in netlist_data["devices"]
+    ]
+
+    layout_devices = devices_data["devices"]
+
+    # Run matching
+    match_results = match_devices(spice_devices, layout_devices)
+
+    # Build match list with confidence
+    matched_spice_names = set()
+    matched_layout_ids = set()
+    matches = []
+    for result in match_results:
+        matches.append({
+            "layout_device_id": result.layout_geometry_id,
+            "spice_device": result.spice_device.instance_name,
+            "spice_device_type": result.spice_device.device_type,
+            "confidence": result.confidence,
+        })
+        matched_spice_names.add(result.spice_device.instance_name)
+        matched_layout_ids.add(result.layout_geometry_id)
+
+    # Unmatched devices
+    all_spice_names = {d["instance_name"] for d in netlist_data["devices"]}
+    all_layout_ids = {d["id"] for d in devices_data["devices"]}
+
+    unmatched_spice = sorted(all_spice_names - matched_spice_names)
+    unmatched_layout = sorted(all_layout_ids - matched_layout_ids)
+
+    return {
+        "matches": matches,
+        "unmatched_spice": unmatched_spice,
+        "unmatched_layout": unmatched_layout,
+    }
 
 
 @router.post("/{project_id}/devices/{device_id}/modify")

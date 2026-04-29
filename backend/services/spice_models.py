@@ -7,42 +7,56 @@ from dataclasses import dataclass, field
 
 @dataclass
 class SpiceDevice:
-    """Represents a single SPICE device instance."""
+    """Represents a single SPICE device instance.
 
-    device_type: str
+    Attributes:
+        instance_name: Device name (e.g., "L1", "C2", "R3")
+        device_type: Device type ("inductor", "capacitor", "resistor")
+        value: Numeric value (already parsed to base SI units - H, F, or Ohm)
+        unit: Unit string ("nH", "pF", "Ω", etc.)
+        nets: List of connected net names
+        subcircuit: Subcircuit name if inside a .SUBCKT, "" for top-level
+    """
+
     instance_name: str
-    nodes: list[str]
-    parameters: dict[str, str] = field(default_factory=dict)
+    device_type: str
+    value: float
+    unit: str
+    nets: list[str] = field(default_factory=list)
+    subcircuit: str = ""
 
 
 @dataclass
 class SpiceNetlist:
-    """Represents a SPICE netlist containing multiple devices."""
+    """Represents a SPICE netlist containing multiple devices.
 
-    title: str
+    Attributes:
+        devices: List of top-level devices
+        subcircuits: Dict of subcircuit_name -> list of devices
+        global_nets: Set of global net names (e.g., "gnd", "vdd")
+    """
+
     devices: list[SpiceDevice] = field(default_factory=list)
-
-    def add_device(self, device: SpiceDevice) -> None:
-        """Add a device to the netlist."""
-        self.devices.append(device)
-
-    def to_spice_string(self) -> str:
-        """Generate SPICE netlist string."""
-        lines = [self.title]
-        for dev in self.devices:
-            param_str = " ".join(f"{k}={v}" for k, v in dev.parameters.items())
-            nodes_str = " ".join(dev.nodes)
-            line = f"{dev.instance_name} {nodes_str}"
-            if param_str:
-                line += f" {param_str}"
-            lines.append(line)
-        return "\n".join(lines)
+    subcircuits: dict[str, list[SpiceDevice]] = field(default_factory=dict)
+    global_nets: set[str] = field(default_factory=set)
 
 
 @dataclass
 class MatchResult:
-    """Result of matching a layout geometry to a SPICE device."""
+    """Result of matching a SPICE device to a layout device.
 
-    layout_geometry_id: str
-    spice_device: SpiceDevice
-    confidence: float = 0.0
+    Attributes:
+        spice_name: SPICE instance name (e.g., "L1")
+        layout_id: Layout device ID (e.g., "dev_001")
+        spice_value: SPICE device value
+        layout_value: Layout device value
+        confidence: Match confidence score (0.0 - 1.0)
+        match_method: How the match was determined ("value_exact", "value_close")
+    """
+
+    spice_name: str
+    layout_id: str
+    spice_value: float
+    layout_value: float
+    confidence: float
+    match_method: str

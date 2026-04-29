@@ -245,8 +245,9 @@ def match_project_devices(project_id: str):
         SpiceDevice(
             device_type=d["device_type"],
             instance_name=d["instance_name"],
-            nodes=d.get("nets", []),
-            parameters={"value": d.get("raw_value", d.get("value", ""))},
+            value=d.get("value", 0.0),
+            unit=d.get("unit", ""),
+            nets=d.get("nets", []),
         )
         for d in netlist_data["devices"]
     ]
@@ -560,7 +561,7 @@ async def upload_netlist(project_id: str, file: UploadFile = File(...)):
                 "value": d.value,
                 "unit": d.unit,
                 "nets": d.nets,
-                "raw_value": d.raw_value,
+                "subcircuit": d.subcircuit,
             }
             for d in parsed.devices
         ],
@@ -572,7 +573,7 @@ async def upload_netlist(project_id: str, file: UploadFile = File(...)):
                     "value": d.value,
                     "unit": d.unit,
                     "nets": d.nets,
-                    "raw_value": d.raw_value,
+                    "subcircuit": d.subcircuit,
                 }
                 for d in devs
             ]
@@ -606,7 +607,6 @@ def get_netlist(project_id: str):
                 "value": d.value,
                 "unit": d.unit,
                 "nets": d.nets,
-                "raw_value": d.raw_value,
             }
             for d in parsed.devices
         ],
@@ -618,7 +618,6 @@ def get_netlist(project_id: str):
                     "value": d.value,
                     "unit": d.unit,
                     "nets": d.nets,
-                    "raw_value": d.raw_value,
                 }
                 for d in devs
             ]

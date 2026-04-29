@@ -1,8 +1,8 @@
 """SPICE netlist parser for L/C/R devices and subcircuits."""
 
 import re
-from dataclasses import dataclass, field
 from typing import Optional
+from services.spice_models import SpiceDevice, SpiceNetlist
 
 
 # Engineering notation prefixes
@@ -17,25 +17,6 @@ ENGINEERING_PREFIXES = {
     "g": 1e9,     # giga
     "t": 1e12,    # tera
 }
-
-
-@dataclass
-class SpiceDevice:
-    """Represents a parsed SPICE device."""
-    instance_name: str
-    device_type: str
-    value: float
-    unit: str
-    nets: list[str] = field(default_factory=list)
-    raw_value: Optional[str] = None
-
-
-@dataclass
-class SpiceNetlist:
-    """Represents a parsed SPICE netlist."""
-    devices: list[SpiceDevice] = field(default_factory=list)
-    subcircuits: dict[str, list[SpiceDevice]] = field(default_factory=dict)
-    top_level_nets: set[str] = field(default_factory=set)
 
 
 def parse_engineering(value_str: str, device_type: str = "") -> tuple[float, str]:
@@ -53,21 +34,7 @@ def parse_engineering(value_str: str, device_type: str = "") -> tuple[float, str
     """
     value_str = value_str.strip()
 
-    # Engineering scale factors (prefixes)
-    scale_factors = {
-        "f": 1e-15,   # femto
-        "p": 1e-12,   # pico
-        "n": 1e-9,    # nano
-        "u": 1e-6,    # micro
-        "m": 1e-3,    # milli
-        "k": 1e3,     # kilo
-        "meg": 1e6,   # mega
-        "g": 1e9,     # giga
-        "t": 1e12,    # tera
-    }
-
     # Map device type to implied unit letter
-    # Only inductors and capacitors need implied unit; resistors use prefix directly
     implied_unit = {"inductor": "H", "capacitor": "F"}
 
     # Regex to parse: number + optional (scale factor + optional unit letter)
@@ -138,7 +105,6 @@ def parse_device_line(line: str) -> Optional[SpiceDevice]:
         value=value,
         unit=unit,
         nets=nets,
-        raw_value=raw_val,
     )
 
 
@@ -195,6 +161,6 @@ def parse_spice(netlist_text: str) -> SpiceNetlist:
             netlist.devices.append(device)
             for net in device.nets:
                 if net.lower() != "gnd":
-                    netlist.top_level_nets.add(net)
+                    netlist.global_nets.add(net)
 
     return netlist

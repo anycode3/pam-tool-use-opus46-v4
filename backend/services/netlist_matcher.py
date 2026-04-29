@@ -1,15 +1,7 @@
 """Value-based matching between SPICE devices and layout devices."""
 
 import numpy as np
-import re
-from typing import Optional
 from services.spice_models import SpiceDevice, SpiceNetlist, MatchResult
-
-# Engineering notation suffixes -> multiplier to get base unit
-UNIT_PREFIXES = {
-    "f": 1e-15, "p": 1e-12, "n": 1e-9, "u": 1e-6,
-    "m": 1e-3, "k": 1e3, "meg": 1e6, "g": 1e9
-}
 
 # Layout unit -> multiplier to get base unit (H for inductors, F for capacitors, Ω for resistors)
 LAYOUT_UNIT_MULTIPLIERS = {
@@ -19,70 +11,15 @@ LAYOUT_UNIT_MULTIPLIERS = {
 }
 
 
-def _parse_value_from_params(params: dict) -> tuple[float, str]:
-    """Parse value from SpiceDevice parameters dict (e.g., {'value': '5nH'}).
+def _get_layout_base_value(layout_dev: dict) -> tuple[float, float]:
+    """Get layout device value and multiplier.
 
-    Returns (value_in_base_units, unit_string).
+    Returns (value_in_base_units, multiplier).
     """
-    value_str = params.get("value", "0")
-    return _parse_spice_value(value_str)
-
-
-def _parse_spice_value(value_str: str) -> tuple[float, str]:
-    """Parse SPICE value string like '5nH', '4.7k', '2.3pF' into (base_value, unit).
-
-    The base_value is the actual SI value (5nH -> 5e-9 Henries).
-    """
-    value_str = value_str.strip()
-
-    # Check for engineering notation suffix (n, p, k, meg, etc.)
-    for suffix, multiplier in UNIT_PREFIXES.items():
-        suffix_lower = suffix.lower()
-        if value_str.lower().endswith(suffix_lower):
-            num_str = value_str[:-len(suffix_lower)].strip()
-            try:
-                val = float(num_str) * multiplier
-                return (val, _get_unit_from_prefix(suffix_lower))
-            except ValueError:
-                pass
-
-    # Try parsing with unit at end: 5nH, 2pF, 100Ω
-    pattern = r'^([+-]?\d+\.?\d*)([fpnumk]?)(H|F|Ω)?'
-    m = re.match(pattern, value_str, re.IGNORECASE)
-    if m:
-        num = float(m.group(1))
-        prefix = m.group(2).lower() if m.group(2) else ""
-        unit = m.group(3) if m.group(3) else ""
-
-        if prefix:
-            multiplier = UNIT_PREFIXES.get(prefix, 1)
-            val = num * multiplier
-            return (val, _get_unit_from_prefix(prefix))
-        elif unit:
-            return (num, unit)
-
-    # Default: plain number -> Ohm
-    try:
-        return (float(value_str), "Ω")
-    except ValueError:
-        return (0.0, "Ω")
-
-
-def _get_unit_from_prefix(prefix: str) -> str:
-    """Map prefix letter to unit string."""
-    mapping = {
-        "f": "fF", "p": "pF", "n": "nH", "u": "uF",
-        "m": "mH", "k": "kΩ", "meg": "MΩ", "g": "GHz"
-    }
-    return mapping.get(prefix, "Ω")
-
-
-def _get_layout_base_value(layout_dev: dict) -> float:
-    """Get layout device value in base SI units (H, F, or Ω)."""
     value = layout_dev.get("value", 0)
     unit = layout_dev.get("unit", "Ω")
     multiplier = LAYOUT_UNIT_MULTIPLIERS.get(unit, 1)
-    return value * multiplier
+    return value * multiplier, multiplier
 
 
 def _value_similarity(v1: float, v2: float) -> float:
@@ -108,7 +45,7 @@ def _type_compatible(spice_type: str, layout_type: str) -> bool:
     return type_map.get(spice_type) == type_map.get(layout_type)
 
 
-def compute_confidence(similarity: float) -> float:
+def _compute_confidence(similarity: float) -> float:
     """Compute confidence from similarity score."""
     if similarity >= 0.98:
         return 1.0
@@ -139,15 +76,23 @@ def match_devices(spice_devices: list[SpiceDevice], layout_devices: list[dict]) 
     cost_matrix = np.full((n_spice, n_layout), 1.0)
 
     for i, spice_dev in enumerate(spice_devices):
-        # Parse spice value in base SI units
-        spice_val, _ = _parse_value_from_params(spice_dev.parameters)
+        spice_val = spice_dev.value
+        spice_unit = spice_dev.unit
+
+        # Convert SPICE value to base units if needed
+        if spice_unit in LAYOUT_UNIT_MULTIPLIERS:
+            spice_val = spice_val * LAYOUT_UNIT_MULTIPLIERS[spice_unit]
+        elif spice_unit == "nH":
+            spice_val = spice_val * 1e-9
+        elif spice_unit == "pF":
+            spice_val = spice_val * 1e-12
 
         for j, layout_dev in enumerate(layout_devices):
             if not _type_compatible(spice_dev.device_type, layout_dev.get("type", "")):
                 continue
 
             # Get layout value in base SI units
-            layout_val = _get_layout_base_value(layout_dev)
+            layout_val, layout_mult = _get_layout_base_value(layout_dev)
 
             # Skip if either is zero
             if spice_val <= 0 or layout_val <= 0:
@@ -174,15 +119,18 @@ def match_devices(spice_devices: list[SpiceDevice], layout_devices: list[dict]) 
             similarity = 1.0 - cost_matrix[i, j]
 
             results.append(MatchResult(
-                layout_geometry_id=layout_dev["id"],
-                spice_device=spice_dev,
-                confidence=compute_confidence(similarity),
+                spice_name=spice_dev.instance_name,
+                layout_id=layout_dev["id"],
+                spice_value=spice_dev.value,
+                layout_value=layout_dev.get("value", 0),
+                confidence=_compute_confidence(similarity),
+                match_method="value_exact" if similarity >= 0.98 else "value_close",
             ))
 
     return results
 
 
-def _greedy_match(spice_devices, layout_devices, cost_matrix):
+def _greedy_match(spice_devices: list[SpiceDevice], layout_devices: list[dict], cost_matrix: np.ndarray) -> list[MatchResult]:
     """Fallback greedy matching when scipy unavailable."""
     results = []
     matched_layout = set()
@@ -201,9 +149,12 @@ def _greedy_match(spice_devices, layout_devices, cost_matrix):
     for similarity, i, j, spice_dev, layout_dev in candidates:
         if j not in matched_layout:
             results.append(MatchResult(
-                layout_geometry_id=layout_dev["id"],
-                spice_device=spice_dev,
-                confidence=compute_confidence(similarity),
+                spice_name=spice_dev.instance_name,
+                layout_id=layout_dev["id"],
+                spice_value=spice_dev.value,
+                layout_value=layout_dev.get("value", 0),
+                confidence=_compute_confidence(similarity),
+                match_method="value_exact" if similarity >= 0.98 else "value_close",
             ))
             matched_layout.add(j)
 
